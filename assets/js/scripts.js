@@ -236,4 +236,18 @@ $(document).ready(function() {
             { "orderable": false, "targets": [6] }
         ]
     });
+
+  // Initialize datepicker for expiry date
+    const today = new Date();
+    const minDate = today.toISOString().split('T')[0];
+    $('#restockExpiryDate').attr('min', minDate);
+    
+    // Generate a simple batch number if empty
+    $('#restockBatchNumber').on('focus', function() {
+        if (!this.value) {
+            const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+            this.value = 'BATCH-' + randomNum + '-' + today.getFullYear().toString().slice(-2);
+        }
+    });
+
 });

@@ -24,7 +24,7 @@ try {
     // Process inventory adjustments
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $csrfToken = $_POST['csrf_token'] ?? '';
-        
+
         if (!verifyCsrfToken($csrfToken)) {
             throw new Exception('Invalid form submission.');
         }
@@ -34,85 +34,85 @@ try {
                 $inventoryId = (int)($_POST['inventory_id'] ?? 0);
                 $adjustment = (int)($_POST['adjustment'] ?? 0);
                 $notes = sanitizeInput($_POST['notes'] ?? '');
-                
+
                 if ($inventoryId <= 0) {
                     throw new Exception('Invalid inventory item.');
                 }
-                
+
                 if ($adjustment === 0) {
                     throw new Exception('Adjustment quantity cannot be zero.');
                 }
-                
+
                 // Get current quantity
                 $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory WHERE inventory_id = ?");
                 $stmt->execute([$inventoryId]);
                 $currentQty = $stmt->fetchColumn();
-                
+
                 if ($currentQty === false) {
                     throw new Exception('Inventory item not found.');
                 }
-                
+
                 $newQty = $currentQty + $adjustment;
                 if ($newQty < 0) {
                     throw new Exception('Adjustment would result in negative stock.');
                 }
-                
+
                 // Update inventory
                 $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = ? WHERE inventory_id = ?");
                 $stmt->execute([$newQty, $inventoryId]);
-                
+
                 // Record transaction
                 $stmt = $db->prepare("INSERT INTO transactions 
                     (drug_id, department_id, transaction_type, quantity, notes, created_by)
                     SELECT drug_id, department_id, 'adjustment', ?, ?, ?
                     FROM inventory WHERE inventory_id = ?");
                 $stmt->execute([abs($adjustment), $notes, $currentUser['user_id'], $inventoryId]);
-                
+
                 $message = 'Inventory adjusted successfully.';
                 break;
-                
+
             case 'transfer':
                 $inventoryId = (int)($_POST['inventory_id'] ?? 0);
                 $quantity = (int)($_POST['quantity'] ?? 0);
                 $toDept = (int)($_POST['to_department'] ?? 0);
                 $notes = sanitizeInput($_POST['notes'] ?? '');
-                
+
                 if ($inventoryId <= 0 || $toDept <= 0) {
                     throw new Exception('Invalid transfer parameters.');
                 }
-                
+
                 if ($quantity <= 0) {
                     throw new Exception('Transfer quantity must be positive.');
                 }
-                
+
                 // Get inventory details
                 $stmt = $db->prepare("SELECT drug_id, department_id, quantity_in_stock 
                                     FROM inventory WHERE inventory_id = ?");
                 $stmt->execute([$inventoryId]);
                 $inventory = $stmt->fetch();
-                
+
                 if (!$inventory) {
                     throw new Exception('Inventory item not found.');
                 }
-                
+
                 if ($inventory['quantity_in_stock'] < $quantity) {
                     throw new Exception('Not enough stock for transfer.');
                 }
-                
+
                 // Check if destination is different
                 if ($inventory['department_id'] == $toDept) {
                     throw new Exception('Cannot transfer to the same department.');
                 }
-                
+
                 // Begin transaction
                 $db->beginTransaction();
-                
+
                 try {
                     // Reduce source inventory
                     $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock - ? 
                                         WHERE inventory_id = ?");
                     $stmt->execute([$quantity, $inventoryId]);
-                    
+
                     // Add to destination inventory (or create if doesn't exist)
                     $stmt = $db->prepare("INSERT INTO inventory 
                                         (drug_id, department_id, quantity_in_stock)
@@ -120,7 +120,7 @@ try {
                                         ON DUPLICATE KEY UPDATE 
                                         quantity_in_stock = quantity_in_stock + VALUES(quantity_in_stock)");
                     $stmt->execute([$inventory['drug_id'], $toDept, $quantity]);
-                    
+
                     // Record transaction
                     $stmt = $db->prepare("INSERT INTO transactions 
                                         (drug_id, department_id, transaction_type, quantity, 
@@ -134,9 +134,71 @@ try {
                         $notes,
                         $currentUser['user_id']
                     ]);
-                    
+
                     $db->commit();
                     $message = 'Inventory transfer completed successfully.';
+                } catch (Exception $e) {
+                    $db->rollBack();
+                    throw $e;
+                }
+                break;
+
+            case 'restock':
+                $drugId = (int)($_POST['drug_id'] ?? 0);
+                $departmentId = (int)($_POST['department_id'] ?? 0);
+                $quantity = (int)($_POST['quantity'] ?? 0);
+                $batchNumber = sanitizeInput($_POST['batch_number'] ?? '');
+                $expiryDate = $_POST['expiry_date'] ?? '';
+                $supplierId = (int)($_POST['supplier_id'] ?? 0);
+                $unitPrice = (float)($_POST['unit_price'] ?? 0);
+
+                if ($drugId <= 0 || $departmentId <= 0) {
+                    throw new Exception('Invalid drug or department.');
+                }
+
+                if ($quantity <= 0) {
+                    throw new Exception('Quantity must be positive.');
+                }
+
+                if (empty($batchNumber)) {
+                    throw new Exception('Batch number is required.');
+                }
+
+                if (empty($expiryDate)) {
+                    throw new Exception('Expiry date is required.');
+                }
+
+                if ($unitPrice <= 0) {
+                    throw new Exception('Unit price must be positive.');
+                }
+
+                $totalPrice = $unitPrice * $quantity;
+
+                $db->beginTransaction();
+
+                try {
+                    $stmt = $db->prepare("INSERT INTO inventory 
+            (drug_id, department_id, quantity_in_stock, batch_number, expiry_date, last_restocked)
+            VALUES (?, ?, ?, ?, ?, CURDATE())
+            ON DUPLICATE KEY UPDATE 
+            quantity_in_stock = quantity_in_stock + VALUES(quantity_in_stock),
+            expiry_date = VALUES(expiry_date),
+            last_restocked = VALUES(last_restocked)");
+                    $stmt->execute([$drugId, $departmentId, $quantity, $batchNumber, $expiryDate]);
+
+                    $stmt = $db->prepare("INSERT INTO purchases 
+            (drug_id, supplier_id, batch_number, quantity, unit_price, total_price, purchase_date, expiry_date, received_by)
+            VALUES (?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)");
+                    $stmt->execute([$drugId, $supplierId, $batchNumber, $quantity, $unitPrice, $totalPrice, $expiryDate, $currentUser['user_id']]);
+
+                    // Record transaction
+                    $stmt = $db->prepare("INSERT INTO transactions 
+            (drug_id, department_id, transaction_type, quantity, notes, created_by)
+            VALUES (?, ?, 'issue', ?, 'Initial restock', ?)");
+                    $stmt->execute([$drugId, $departmentId, $quantity, $currentUser['user_id']]);
+
+                    $db->commit();
+                    $message = 'Inventory restocked successfully.';
                 } catch (Exception $e) {
                     $db->rollBack();
                     throw $e;
@@ -146,21 +208,32 @@ try {
     }
 
     // Get inventory data
-    $inventoryItems = $db->query("
+
+    try {
+        $inventoryItems = $db->query("
         SELECT i.inventory_id, d.drug_name, c.category_name, dept.department_name,
                i.quantity_in_stock, d.reorder_level, i.expiry_date,
                DATEDIFF(i.expiry_date, CURDATE()) as days_until_expiry,
                i.batch_number, i.last_restocked
         FROM inventory i
         JOIN drugs d ON i.drug_id = d.drug_id
-        JOIN drug_categories c ON d.category_id = c.category_id
+        LEFT JOIN drug_categories c ON d.category_id = c.category_id
         JOIN departments dept ON i.department_id = dept.department_id
         ORDER BY dept.department_name, d.drug_name
     ")->fetchAll();
+    } catch (PDOException $e) {
+        $inventoryItems = [];
+        error_log("Inventory query error: " . $e->getMessage());
+    }
+
+    // Get drugs for restock dropdown
+    $drugs = $db->query("SELECT drug_id, drug_name FROM drugs ORDER BY drug_name")->fetchAll();
+
+    // Get suppliers for restock dropdown
+    $suppliers = $db->query("SELECT supplier_id, supplier_name FROM suppliers WHERE is_active = 1 ORDER BY supplier_name")->fetchAll();
 
     // Get departments for transfer dropdown
     $departments = $db->query("SELECT department_id, department_name FROM departments ORDER BY department_name")->fetchAll();
-
 } catch (Exception $e) {
     $error = $e->getMessage();
 }
@@ -184,21 +257,21 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Alert Messages -->
     <?php if (!empty($message)): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($message) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($message) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
-    
+
     <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
     <!-- Inventory Summary Cards -->
@@ -212,7 +285,8 @@ require_once __DIR__ . '/../includes/header.php';
                             <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
                                 Total Inventory Items</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                <?= count($inventoryItems) ?></div>
+                                <?= count($inventoryItems ?? []) ?>
+                            </div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-boxes fa-2x text-gray-300"></i>
@@ -287,6 +361,9 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
             <h6 class="m-0 font-weight-bold text-primary">Current Inventory</h6>
             <div>
+                <button class="btn btn-sm btn-success mr-2" data-toggle="modal" data-target="#restockModal">
+                    <i class="fas fa-plus"></i> Restock
+                </button>
                 <button class="btn btn-sm btn-primary" data-toggle="modal" data-target="#filterModal">
                     <i class="fas fa-filter"></i> Filter
                 </button>
@@ -308,49 +385,55 @@ require_once __DIR__ . '/../includes/header.php';
                     </thead>
                     <tbody>
                         <?php foreach ($inventoryItems as $item): ?>
-                        <tr class="<?= $item['quantity_in_stock'] <= $item['reorder_level'] ? 'table-warning' : '' ?>
+                            <tr class="<?= $item['quantity_in_stock'] <= $item['reorder_level'] ? 'table-warning' : '' ?>
                                    <?= $item['days_until_expiry'] !== null && $item['days_until_expiry'] <= 30 ? 'table-danger' : '' ?>">
-                            <td><?= htmlspecialchars($item['drug_name']) ?></td>
-                            <td><?= htmlspecialchars($item['category_name']) ?></td>
-                            <td><?= htmlspecialchars($item['department_name']) ?></td>
-                            <td><?= htmlspecialchars($item['batch_number']) ?></td>
-                            <td>
-                                <span class="<?= $item['quantity_in_stock'] <= $item['reorder_level'] ? 'font-weight-bold text-warning' : '' ?>">
-                                    <?= $item['quantity_in_stock'] ?>
-                                </span>
-                                <?php if ($item['quantity_in_stock'] <= $item['reorder_level']): ?>
-                                <small class="text-muted d-block">Reorder: <?= $item['reorder_level'] ?></small>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <?php if ($item['expiry_date']): ?>
-                                    <?= formatDate($item['expiry_date']) ?>
-                                    <small class="d-block <?= $item['days_until_expiry'] <= 30 ? 'text-danger font-weight-bold' : 'text-muted' ?>">
-                                        (<?= $item['days_until_expiry'] ?> days)
-                                    </small>
-                                <?php else: ?>
-                                    N/A
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-center">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <button class="btn btn-info btn-sm" 
-                                            onclick="showAdjustModal(<?= $item['inventory_id'] ?>, '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>')"
-                                            title="Adjust Stock">
-                                        <i class="fas fa-adjust"></i>
-                                    </button>
-                                    <button class="btn btn-primary btn-sm" 
-                                            onclick="showTransferModal(<?= $item['inventory_id'] ?>, '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>', <?= $item['quantity_in_stock'] ?>)"
-                                            title="Transfer Stock">
-                                        <i class="fas fa-exchange-alt"></i>
-                                    </button>
-                                    <a href="/pham/drugs.php?action=view&id=<?= $item['drug_id'] ?>" 
-                                       class="btn btn-secondary btn-sm" title="View Drug">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
-                                </div>
-                            </td>
-                        </tr>
+                                <td><?= htmlspecialchars($item['drug_name']) ?></td>
+                                <td><?= htmlspecialchars($item['category_name']) ?></td>
+                                <td><?= htmlspecialchars($item['department_name']) ?></td>
+                                <td><?= htmlspecialchars($item['batch_number']) ?></td>
+                                <td>
+                                    <span class="<?= $item['quantity_in_stock'] <= $item['reorder_level'] ? 'font-weight-bold text-warning' : '' ?>">
+                                        <?= $item['quantity_in_stock'] ?>
+                                    </span>
+                                    <?php if ($item['quantity_in_stock'] <= $item['reorder_level']): ?>
+                                        <small class="text-muted d-block">Reorder: <?= $item['reorder_level'] ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($item['expiry_date']): ?>
+                                        <?= formatDate($item['expiry_date']) ?>
+                                        <small class="d-block <?= $item['days_until_expiry'] <= 30 ? 'text-danger font-weight-bold' : 'text-muted' ?>">
+                                            (<?= $item['days_until_expiry'] ?> days)
+                                        </small>
+                                    <?php else: ?>
+                                        N/A
+                                    <?php endif; ?>
+                                </td>
+<td class="text-center">
+    <div class="btn-group btn-group-sm" role="group">
+        <button class="btn btn-info btn-sm"
+            onclick="showAdjustModal(<?= $item['inventory_id'] ?>, '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>')"
+            title="Adjust Stock">
+            <i class="fas fa-adjust"></i>
+        </button>
+        <button class="btn btn-primary btn-sm"
+            onclick="showTransferModal(<?= $item['inventory_id'] ?>, '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>', <?= $item['quantity_in_stock'] ?>)"
+            title="Transfer Stock">
+            <i class="fas fa-exchange-alt"></i>
+        </button>
+        <?php if (!empty($item['drug_id'])): ?>
+            <a href="/pham/drugs.php?action=view&id=<?= (int)$item['drug_id'] ?>"
+                class="btn btn-secondary btn-sm" title="View Drug">
+                <i class="fas fa-eye"></i>
+            </a>
+        <?php else: ?>
+            <button class="btn btn-secondary btn-sm" title="View Drug">
+                <i class="fas fa-eye"></i>
+            </button>
+        <?php endif; ?>
+    </div>
+</td>
+                            </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
@@ -433,7 +516,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <select class="form-control" id="toDepartment" name="to_department" required>
                             <option value="">Select Department</option>
                             <?php foreach ($departments as $dept): ?>
-                            <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
+                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -485,6 +568,97 @@ require_once __DIR__ . '/../includes/header.php';
                     <button type="submit" class="btn btn-primary">Generate Report</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<!-- Restock Modal -->
+<div class="modal fade" id="restockModal" tabindex="-1" role="dialog" aria-labelledby="restockModalLabel" aria-hidden="true" style="z-index: 1052;">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="restockModalLabel">Restock Inventory</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form method="post" action="?action=restock">
+                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="restockDrug">Drug *</label>
+                        <select class="form-control" id="restockDrug" name="drug_id" required>
+                            <option value="">Select Drug</option>
+                            <?php foreach ($drugs as $drug): ?>
+                                <option value="<?= $drug['drug_id'] ?>"><?= htmlspecialchars($drug['drug_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockDepartment">Department *</label>
+                        <select class="form-control" id="restockDepartment" name="department_id" required>
+                            <option value="">Select Department</option>
+                            <?php foreach ($departments as $dept): ?>
+                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockQuantity">Quantity *</label>
+                        <input type="number" class="form-control" id="restockQuantity" name="quantity" min="1" value="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockUnitPrice">Unit Price *</label>
+                        <input type="number" class="form-control" id="restockUnitPrice" name="unit_price" min="0.01" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockBatchNumber">Batch Number *</label>
+                        <input type="text" class="form-control" id="restockBatchNumber" name="batch_number" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockExpiryDate">Expiry Date *</label>
+                        <input type="date" class="form-control" id="restockExpiryDate" name="expiry_date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="restockSupplier">Supplier *</label>
+                        <select class="form-control" id="restockSupplier" name="supplier_id" required>
+                            <option value="">Select Supplier</option>
+                            <?php foreach ($suppliers as $supplier): ?>
+                                <option value="<?= $supplier['supplier_id'] ?>"><?= htmlspecialchars($supplier['supplier_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Restock</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- View Drug Modal -->
+<div class="modal fade" id="viewDrugModal" tabindex="-1" role="dialog" aria-labelledby="viewDrugModalLabel" aria-hidden="true" style="z-index: 1052;">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="viewDrugModalLabel">Drug Details</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" id="drugDetailsContent">
+                <!-- Content will be loaded via AJAX -->
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="sr-only">Loading...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+            </div>
         </div>
     </div>
 </div>
