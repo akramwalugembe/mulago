@@ -1,0 +1,9 @@
+.btn-outline-warning {
+    color: #ff9800;
+    border-color: #ff9800;
+}
+
+.btn-outline-warning:hover {
+    background-color: #ff9800;
+    color: white;
+}
