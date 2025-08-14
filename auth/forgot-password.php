@@ -8,7 +8,7 @@ $error = '';
 
 // Redirect if already logged in
 if ($auth->isLoggedIn()) {
-    redirect('/');
+    redirect('../pham/index.php');
 }
 
 // Handle form submission

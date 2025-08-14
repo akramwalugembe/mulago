@@ -55,7 +55,6 @@ try {
 
     // Total inventory items
     $inventoryCount = $db->query("SELECT COUNT(*) as count FROM inventory")->fetch()['count'];
-
 } catch (PDOException $e) {
     error_log("Dashboard query error: " . $e->getMessage());
     $error = "Unable to load dashboard data. Please try again later.";
@@ -76,12 +75,12 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Alert Messages -->
     <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
     <!-- Quick Stats Cards -->
@@ -178,29 +177,30 @@ require_once __DIR__ . '/../includes/header.php';
                                     <th>Drug Name</th>
                                     <th>Current Stock</th>
                                     <th>Reorder Level</th>
-                                    <th>Action</th>
+                                    <!-- <th>Action</th> -->
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($lowStock as $item): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($item['drug_name']) ?></td>
-                                    <td class="<?= $item['quantity_in_stock'] < ($item['reorder_level'] / 2) ? 'text-danger font-weight-bold' : 'text-warning' ?>">
-                                        <?= $item['quantity_in_stock'] ?>
-                                    </td>
-                                    <td><?= $item['reorder_level'] ?></td>
-                                    <td>
-                                        <button class="btn btn-sm btn-outline-primary" 
-                                                onclick="showRestockModal(<?= $item['drug_id'] ?>, '<?= htmlspecialchars($item['drug_name']) ?>')">
-                                            Restock
-                                        </button>
-                                    </td>
-                                </tr>
+                                    <tr>
+                                        <td><?= htmlspecialchars($item['drug_name']) ?></td>
+                                        <td class="<?= $item['quantity_in_stock'] < ($item['reorder_level'] / 2) ? 'text-danger font-weight-bold' : 'text-warning' ?>">
+                                            <?= $item['quantity_in_stock'] ?>
+                                        </td>
+                                        <td><?= $item['reorder_level'] ?></td>
+                                        <!-- <td>
+                                        <a href="inventory.php">
+                                            <button class="btn btn-sm btn-outline-primary">
+                                                Restock
+                                            </button>
+                                        </a>
+                                    </td> -->
+                                    </tr>
                                 <?php endforeach; ?>
                                 <?php if (empty($lowStock)): ?>
-                                <tr>
-                                    <td colspan="4" class="text-center text-muted">No low stock items</td>
-                                </tr>
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">No low stock items</td>
+                                    </tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -231,19 +231,19 @@ require_once __DIR__ . '/../includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($expiringSoon as $item): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($item['drug_name']) ?></td>
-                                    <td><?= formatDate($item['expiry_date']) ?></td>
-                                    <td class="<?= $item['days_remaining'] < 7 ? 'text-danger font-weight-bold' : 'text-warning' ?>">
-                                        <?= $item['days_remaining'] ?>
-                                    </td>
-                                    <td><?= htmlspecialchars($item['department_name']) ?></td>
-                                </tr>
+                                    <tr>
+                                        <td><?= htmlspecialchars($item['drug_name']) ?></td>
+                                        <td><?= formatDate($item['expiry_date']) ?></td>
+                                        <td class="<?= $item['days_remaining'] < 7 ? 'text-danger font-weight-bold' : 'text-warning' ?>">
+                                            <?= $item['days_remaining'] ?>
+                                        </td>
+                                        <td><?= htmlspecialchars($item['department_name']) ?></td>
+                                    </tr>
                                 <?php endforeach; ?>
                                 <?php if (empty($expiringSoon)): ?>
-                                <tr>
-                                    <td colspan="4" class="text-center text-muted">No items expiring soon</td>
-                                </tr>
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">No items expiring soon</td>
+                                    </tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -260,7 +260,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
                     <h6 class="m-0 font-weight-bold text-primary">Recent Transactions</h6>
                     <div class="dropdown no-arrow">
-                        <a href="/pham/inventory.php" class="btn btn-sm btn-primary">View All</a>
+                        <a href="inventory.php" class="btn btn-sm btn-primary">View All</a>
                     </div>
                 </div>
                 <div class="card-body">
@@ -278,18 +278,18 @@ require_once __DIR__ . '/../includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($recentTransactions as $txn): ?>
-                                <tr>
-                                    <td><?= formatDateTime($txn['created_at']) ?></td>
-                                    <td><?= htmlspecialchars($txn['drug_name']) ?></td>
-                                    <td>
-                                        <span class="badge badge-<?= getTransactionBadgeClass($txn['transaction_type']) ?>">
-                                            <?= ucfirst($txn['transaction_type']) ?>
-                                        </span>
-                                    </td>
-                                    <td><?= $txn['quantity'] ?></td>
-                                    <td><?= htmlspecialchars($txn['department_name']) ?></td>
-                                    <td><?= htmlspecialchars($txn['full_name']) ?></td>
-                                </tr>
+                                    <tr>
+                                        <td><?= formatDateTime($txn['created_at']) ?></td>
+                                        <td><?= htmlspecialchars($txn['drug_name']) ?></td>
+                                        <td>
+                                            <span class="badge badge-<?= getTransactionBadgeClass($txn['transaction_type']) ?>">
+                                                <?= ucfirst($txn['transaction_type']) ?>
+                                            </span>
+                                        </td>
+                                        <td><?= $txn['quantity'] ?></td>
+                                        <td><?= htmlspecialchars($txn['department_name']) ?></td>
+                                        <td><?= htmlspecialchars($txn['full_name']) ?></td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -329,7 +329,7 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php
                             $suppliers = $db->query("SELECT supplier_id, supplier_name FROM suppliers WHERE is_active = 1")->fetchAll();
                             foreach ($suppliers as $supplier): ?>
-                            <option value="<?= $supplier['supplier_id'] ?>"><?= htmlspecialchars($supplier['supplier_name']) ?></option>
+                                <option value="<?= $supplier['supplier_id'] ?>"><?= htmlspecialchars($supplier['supplier_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

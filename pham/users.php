@@ -14,7 +14,7 @@ $action = $_GET['action'] ?? '';
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $csrfToken = $_POST['csrf_token'] ?? '';
-    
+
     if (!verifyCsrfToken($csrfToken)) {
         $error = 'Invalid form submission.';
     } else {
@@ -26,9 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fullName = sanitizeInput($_POST['full_name'] ?? '');
                     $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
                     $departmentId = (int)($_POST['department_id'] ?? 0);
-                    $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff']) 
-                            ? $_POST['role'] 
-                            : 'department_staff';
+                    $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff'])
+                        ? $_POST['role']
+                        : 'department_staff';
                     $isActive = isset($_POST['is_active']) ? 1 : 0;
 
                     // Validate
@@ -73,9 +73,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fullName = sanitizeInput($_POST['full_name'] ?? '');
                     $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
                     $departmentId = (int)($_POST['department_id'] ?? 0);
-                    $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff']) 
-                            ? $_POST['role'] 
-                            : 'department_staff';
+                    $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff'])
+                        ? $_POST['role']
+                        : 'department_staff';
                     $isActive = isset($_POST['is_active']) ? 1 : 0;
 
                     // Validate
@@ -189,21 +189,21 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Alert Messages -->
     <?php if (!empty($message)): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($message) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($message) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
-    
+
     <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
     <!-- Users Table -->
@@ -228,56 +228,54 @@ require_once __DIR__ . '/../includes/header.php';
                     </thead>
                     <tbody>
                         <?php foreach ($users as $user): ?>
-                        <tr class="<?= !$user['is_active'] ? 'table-secondary' : '' ?>">
-                            <td><?= htmlspecialchars($user['username']) ?></td>
-                            <td><?= htmlspecialchars($user['full_name']) ?></td>
-                            <td><?= htmlspecialchars($user['email']) ?></td>
-                            <td><?= htmlspecialchars($user['department_name'] ?? 'N/A') ?></td>
-                            <td>
-                                <span class="badge badge-<?= 
-                                    $user['role'] === 'admin' ? 'danger' : 
-                                    ($user['role'] === 'pharmacist' ? 'primary' : 'secondary') 
-                                ?>">
-                                    <?= ucfirst($user['role']) ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge badge-<?= $user['is_active'] ? 'success' : 'warning' ?>">
-                                    <?= $user['is_active'] ? 'Active' : 'Inactive' ?>
-                                </span>
-                            </td>
-                            <td><?= $user['last_login'] ? formatDateTime($user['last_login']) : 'Never' ?></td>
-                            <td class="text-center">
-    <div class="btn-group" role="group">
-        <button class="btn btn-sm btn-outline-primary" 
-                title="Edit User"
-                onclick="showEditModal(
-                    <?= $user['user_id'] ?>,
-                    '<?= htmlspecialchars(addslashes($user['username'])) ?>',
-                    '<?= htmlspecialchars(addslashes($user['full_name'])) ?>',
-                    '<?= htmlspecialchars(addslashes($user['email'])) ?>',
-                    <?= $user['department_id'] ?? 'null' ?>,
-                    '<?= $user['role'] ?>',
-                    <?= $user['is_active'] ?>
-                )">
-            <i class="fas fa-edit"></i>
-        </button>
-        <button class="btn btn-sm btn-outline-warning"
-                title="Change Password"
-                onclick="showPasswordModal(<?= $user['user_id'] ?>, '<?= htmlspecialchars(addslashes($user['username'])) ?>')">
-            <i class="fas fa-key"></i>
-        </button>
-        <?php if ($user['is_active'] && $user['user_id'] != $auth->getCurrentUser()['user_id']): ?>
-        <button class="btn btn-sm btn-outline-danger"
-                title="Deactivate User"
-                onclick="confirmDelete(<?= $user['user_id'] ?>, '<?= htmlspecialchars(addslashes($user['username'])) ?>')">
-            <i class="fas fa-user-times"></i>
-        </button>
-        <?php endif; ?>
-    </div>
-</td>
-
-                        </tr>
+                            <tr class="<?= !$user['is_active'] ? 'table-secondary' : '' ?>">
+                                <td><?= htmlspecialchars($user['username']) ?></td>
+                                <td><?= htmlspecialchars($user['full_name']) ?></td>
+                                <td><?= htmlspecialchars($user['email']) ?></td>
+                                <td><?= htmlspecialchars($user['department_name'] ?? 'N/A') ?></td>
+                                <td>
+                                    <span class="badge badge-<?=
+                                                                $user['role'] === 'admin' ? 'danger' : ($user['role'] === 'pharmacist' ? 'primary' : 'secondary')
+                                                                ?>">
+                                        <?= ucfirst($user['role']) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge badge-<?= $user['is_active'] ? 'success' : 'warning' ?>">
+                                        <?= $user['is_active'] ? 'Active' : 'Inactive' ?>
+                                    </span>
+                                </td>
+                                <td><?= $user['last_login'] ? formatDateTime($user['last_login']) : 'Never' ?></td>
+                                <td class="text-center">
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-sm btn-outline-primary"
+                                            title="Edit User"
+                                            onclick="PharmacyModals.showUserEditModal(
+                <?= $user['user_id'] ?>,
+                '<?= htmlspecialchars(addslashes($user['username'])) ?>',
+                '<?= htmlspecialchars(addslashes($user['full_name'])) ?>',
+                '<?= htmlspecialchars(addslashes($user['email'])) ?>',
+                <?= $user['department_id'] ?? 'null' ?>,
+                '<?= $user['role'] ?>',
+                <?= $user['is_active'] ?>
+            )">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-warning"
+                                            title="Change Password"
+                                            onclick="PharmacyModals.showPasswordModal(<?= $user['user_id'] ?>, '<?= htmlspecialchars(addslashes($user['username'])) ?>')">
+                                            <i class="fas fa-key"></i>
+                                        </button>
+                                        <?php if ($user['is_active'] && $user['user_id'] != $auth->getCurrentUser()['user_id']): ?>
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                title="Deactivate User"
+                                                onclick="PharmacyModals.showDeleteModal('user', <?= $user['user_id'] ?>, '<?= htmlspecialchars(addslashes($user['username'])) ?>')">
+                                                <i class="fas fa-user-times"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
@@ -288,61 +286,61 @@ require_once __DIR__ . '/../includes/header.php';
 
 <!-- Add User Modal -->
 <div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="addUserModalLabel">Add New User</h5>
-        <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <form method="post" action="?action=add">
-        <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-        <div class="modal-body">
-          <div class="mb-3">
-            <label for="addUsername" class="form-label">Username *</label>
-            <input type="text" class="form-control" id="addUsername" name="username" required>
-          </div>
-          <div class="mb-3">
-            <label for="addPassword" class="form-label">Password *</label>
-            <input type="password" class="form-control" id="addPassword" name="password" required>
-            <small class="form-text text-muted">At least 8 characters</small>
-          </div>
-          <div class="mb-3">
-            <label for="addFullName" class="form-label">Full Name *</label>
-            <input type="text" class="form-control" id="addFullName" name="full_name" required>
-          </div>
-          <div class="mb-3">
-            <label for="addEmail" class="form-label">Email</label>
-            <input type="email" class="form-control" id="addEmail" name="email">
-          </div>
-          <div class="mb-3">
-            <label for="addDepartment" class="form-label">Department</label>
-            <select class="form-control" id="addDepartment" name="department_id">
-              <option value="">-- Select Department --</option>
-              <?php foreach ($departments as $dept): ?>
-                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="mb-3">
-            <label for="addRole" class="form-label">Role *</label>
-            <select class="form-control" id="addRole" name="role" required>
-              <option value="department_staff">Department Staff</option>
-              <option value="pharmacist">Pharmacist</option>
-              <option value="admin">Administrator</option>
-            </select>
-          </div>
-          <div class="form-check">
-            <input type="checkbox" class="form-check-input" id="addIsActive" name="is_active" checked>
-            <label class="form-check-label" for="addIsActive">Active</label>
-          </div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addUserModalLabel">Add New User</h5>
+                <button type="button" class="btn-close" data-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="?action=add">
+                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="addUsername" class="form-label">Username *</label>
+                        <input type="text" class="form-control" id="addUsername" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addPassword" class="form-label">Password *</label>
+                        <input type="password" class="form-control" id="addPassword" name="password" required>
+                        <small class="form-text text-muted">At least 8 characters</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addFullName" class="form-label">Full Name *</label>
+                        <input type="text" class="form-control" id="addFullName" name="full_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addEmail" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="addEmail" name="email">
+                    </div>
+                    <div class="mb-3">
+                        <label for="addDepartment" class="form-label">Department</label>
+                        <select class="form-control" id="addDepartment" name="department_id">
+                            <option value="">-- Select Department --</option>
+                            <?php foreach ($departments as $dept): ?>
+                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addRole" class="form-label">Role *</label>
+                        <select class="form-control" id="addRole" name="role" required>
+                            <option value="department_staff">Department Staff</option>
+                            <option value="pharmacist">Pharmacist</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="addIsActive" name="is_active" checked>
+                        <label class="form-check-label" for="addIsActive">Active</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add User</button>
+                </div>
+            </form>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-primary">Add User</button>
-        </div>
-      </form>
     </div>
-  </div>
 </div>
 
 
@@ -375,7 +373,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <select class="form-select" id="editDepartment" name="department_id">
                             <option value="">-- Select Department --</option>
                             <?php foreach ($departments as $dept): ?>
-                            <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
+                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

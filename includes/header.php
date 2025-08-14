@@ -60,7 +60,7 @@ $currentUser = $auth->getCurrentUser();
                             <?= htmlspecialchars($currentUser['full_name']) ?>
                         </a>
                         <div class="dropdown-menu">
-                            <a class="dropdown-item" href="../auth/profile.php">Profile</a>
+                            <!-- <a class="dropdown-item" href="../auth/profile.php">Profile</a> -->
                             <a class="dropdown-item" href="../auth/change-password.php">Change Password</a>
                             <div class="dropdown-divider"></div>
                             <a class="dropdown-item" href="../auth/logout.php">Logout</a>

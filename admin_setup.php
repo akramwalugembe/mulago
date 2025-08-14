@@ -1,6 +1,6 @@
 <?php
 // ==============================================
-// DATABASE CONFIGURATION (matches your structure)
+// DATABASE CONFIGURATION
 // ==============================================
 function getDBConnection() {
     $host = 'localhost';
@@ -19,7 +19,7 @@ function getDBConnection() {
 }
 
 // ==============================================
-// ADMIN USER CONFIGURATION (customize these)
+// ADMIN USER CONFIGURATION
 // ==============================================
 $adminDetails = [
     'username' => 'pharmacy_admin',

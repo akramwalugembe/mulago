@@ -14,7 +14,7 @@ $action = $_GET['action'] ?? '';
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $csrfToken = $_POST['csrf_token'] ?? '';
-    
+
     if (!verifyCsrfToken($csrfToken)) {
         $error = 'Invalid form submission.';
     } else {
@@ -160,21 +160,21 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Alert Messages -->
     <?php if (!empty($message)): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($message) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($message) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
-    
+
     <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
     <!-- Drugs Table -->
@@ -198,21 +198,21 @@ require_once __DIR__ . '/../includes/header.php';
                     </thead>
                     <tbody>
                         <?php foreach ($drugs as $drug): ?>
-                        <tr class="<?= !$drug['is_active'] ? 'table-secondary' : '' ?>">
-                            <td><?= htmlspecialchars($drug['drug_name']) ?></td>
-                            <td><?= htmlspecialchars($drug['generic_name'] ?? 'N/A') ?></td>
-                            <td><?= htmlspecialchars($drug['category_name'] ?? 'N/A') ?></td>
-                            <td><?= htmlspecialchars($drug['unit_of_measure']) ?></td>
-                            <td><?= $drug['reorder_level'] ?></td>
-                            <td>
-                                <span class="badge badge-<?= $drug['is_active'] ? 'success' : 'warning' ?>">
-                                    <?= $drug['is_active'] ? 'Active' : 'Inactive' ?>
-                                </span>
-                            </td>
-                            <td class="text-center">
-                                <div class="btn-group btn-group-sm" role="group">
-                                    <button class="btn btn-primary" 
-                                            onclick="showEditModal(
+                            <tr class="<?= !$drug['is_active'] ? 'table-secondary' : '' ?>">
+                                <td><?= htmlspecialchars($drug['drug_name']) ?></td>
+                                <td><?= htmlspecialchars($drug['generic_name'] ?? 'N/A') ?></td>
+                                <td><?= htmlspecialchars($drug['category_name'] ?? 'N/A') ?></td>
+                                <td><?= htmlspecialchars($drug['unit_of_measure']) ?></td>
+                                <td><?= $drug['reorder_level'] ?></td>
+                                <td>
+                                    <span class="badge badge-<?= $drug['is_active'] ? 'success' : 'warning' ?>">
+                                        <?= $drug['is_active'] ? 'Active' : 'Inactive' ?>
+                                    </span>
+                                </td>
+                                <td class="text-center">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button class="btn btn-primary"
+                                            onclick="PharmacyModals.showDrugEditModal(
                                                 <?= $drug['drug_id'] ?>,
                                                 '<?= htmlspecialchars(addslashes($drug['drug_name'])) ?>',
                                                 '<?= htmlspecialchars(addslashes($drug['generic_name'] ?? '')) ?>',
@@ -222,17 +222,17 @@ require_once __DIR__ . '/../includes/header.php';
                                                 '<?= htmlspecialchars(addslashes($drug['description'] ?? '')) ?>',
                                                 <?= $drug['is_active'] ?>
                                             )">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <?php if ($drug['is_active']): ?>
-                                    <button class="btn btn-danger" 
-                                            onclick="confirmDelete(<?= $drug['drug_id'] ?>, '<?= htmlspecialchars(addslashes($drug['drug_name'])) ?>')">
-                                        <i class="fas fa-trash-alt"></i>
-                                    </button>
-                                    <?php endif; ?>
-                                </div>
-                            </td>
-                        </tr>
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <?php if ($drug['is_active']): ?>
+                                            <button class="btn btn-danger"
+                                                onclick="PharmacyModals.showDeleteModal('drug', <?= $drug['drug_id'] ?>, '<?= htmlspecialchars(addslashes($drug['drug_name'])) ?>')">
+                                                <i class="fas fa-trash-alt"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
@@ -267,7 +267,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <select class="form-control" id="addCategory" name="category_id">
                             <option value="">-- Select Category --</option>
                             <?php foreach ($categories as $cat): ?>
-                            <option value="<?= $cat['category_id'] ?>"><?= htmlspecialchars($cat['category_name']) ?></option>
+                                <option value="<?= $cat['category_id'] ?>"><?= htmlspecialchars($cat['category_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -324,7 +324,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <select class="form-control" id="editCategory" name="category_id">
                             <option value="">-- Select Category --</option>
                             <?php foreach ($categories as $cat): ?>
-                            <option value="<?= $cat['category_id'] ?>"><?= htmlspecialchars($cat['category_name']) ?></option>
+                                <option value="<?= $cat['category_id'] ?>"><?= htmlspecialchars($cat['category_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

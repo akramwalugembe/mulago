@@ -21,7 +21,7 @@ $error = '';
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $csrfToken = $_POST['csrf_token'] ?? '';
-        
+
         if (!verifyCsrfToken($csrfToken)) {
             throw new Exception('Invalid form submission.');
         }
@@ -33,11 +33,11 @@ try {
                 $location = sanitizeInput($_POST['location'] ?? '');
                 $contactPerson = sanitizeInput($_POST['contact_person'] ?? '');
                 $contactPhone = sanitizeInput($_POST['contact_phone'] ?? '');
-                
+
                 if (empty($name)) {
                     throw new Exception('Department name is required.');
                 }
-                
+
                 $stmt = $db->prepare("INSERT INTO departments 
                     (department_name, location, contact_person, contact_phone) 
                     VALUES (?, ?, ?, ?)");
@@ -45,7 +45,7 @@ try {
                 $message = 'Department added successfully.';
                 $tab = 'departments';
                 break;
-                
+
             case 'edit_department':
                 $id = (int)($_POST['id'] ?? 0);
                 $name = sanitizeInput($_POST['name'] ?? '');
@@ -53,11 +53,11 @@ try {
                 $contactPerson = sanitizeInput($_POST['contact_person'] ?? '');
                 $contactPhone = sanitizeInput($_POST['contact_phone'] ?? '');
                 $isActive = isset($_POST['is_active']) ? 1 : 0;
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid department.');
                 }
-                
+
                 $stmt = $db->prepare("UPDATE departments SET 
                     department_name = ?, location = ?, contact_person = ?, 
                     contact_phone = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP 
@@ -66,58 +66,58 @@ try {
                 $message = 'Department updated successfully.';
                 $tab = 'departments';
                 break;
-                
+
             case 'delete_department':
                 $id = (int)($_POST['id'] ?? 0);
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid department.');
                 }
-                
+
                 // Check if department is in use
                 $stmt = $db->prepare("SELECT COUNT(*) FROM inventory WHERE department_id = ?");
                 $stmt->execute([$id]);
                 if ($stmt->fetchColumn() > 0) {
                     throw new Exception('Cannot delete department - it has inventory items.');
                 }
-                
+
                 $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE department_id = ?");
                 $stmt->execute([$id]);
                 if ($stmt->fetchColumn() > 0) {
                     throw new Exception('Cannot delete department - it has assigned users.');
                 }
-                
+
                 $stmt = $db->prepare("DELETE FROM departments WHERE department_id = ?");
                 $stmt->execute([$id]);
                 $message = 'Department deleted successfully.';
                 $tab = 'departments';
                 break;
-                
+
             // Category actions
             case 'add_category':
                 $name = sanitizeInput($_POST['name'] ?? '');
                 $description = sanitizeInput($_POST['description'] ?? '');
-                
+
                 if (empty($name)) {
                     throw new Exception('Category name is required.');
                 }
-                
+
                 $stmt = $db->prepare("INSERT INTO drug_categories 
                     (category_name, description) VALUES (?, ?)");
                 $stmt->execute([$name, $description]);
                 $message = 'Category added successfully.';
                 $tab = 'categories';
                 break;
-                
+
             case 'edit_category':
                 $id = (int)($_POST['id'] ?? 0);
                 $name = sanitizeInput($_POST['name'] ?? '');
                 $description = sanitizeInput($_POST['description'] ?? '');
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid category.');
                 }
-                
+
                 $stmt = $db->prepare("UPDATE drug_categories SET 
                     category_name = ?, description = ? 
                     WHERE category_id = ?");
@@ -125,27 +125,27 @@ try {
                 $message = 'Category updated successfully.';
                 $tab = 'categories';
                 break;
-                
+
             case 'delete_category':
                 $id = (int)($_POST['id'] ?? 0);
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid category.');
                 }
-                
+
                 // Check if category is in use
                 $stmt = $db->prepare("SELECT COUNT(*) FROM drugs WHERE category_id = ?");
                 $stmt->execute([$id]);
                 if ($stmt->fetchColumn() > 0) {
                     throw new Exception('Cannot delete category - it is assigned to drugs.');
                 }
-                
+
                 $stmt = $db->prepare("DELETE FROM drug_categories WHERE category_id = ?");
                 $stmt->execute([$id]);
                 $message = 'Category deleted successfully.';
                 $tab = 'categories';
                 break;
-                
+
             // Supplier actions
             case 'add_supplier':
                 $name = sanitizeInput($_POST['name'] ?? '');
@@ -153,11 +153,11 @@ try {
                 $contactPhone = sanitizeInput($_POST['contact_phone'] ?? '');
                 $email = sanitizeInput($_POST['email'] ?? '');
                 $address = sanitizeInput($_POST['address'] ?? '');
-                
+
                 if (empty($name)) {
                     throw new Exception('Supplier name is required.');
                 }
-                
+
                 $stmt = $db->prepare("INSERT INTO suppliers 
                     (supplier_name, contact_person, contact_phone, email, address) 
                     VALUES (?, ?, ?, ?, ?)");
@@ -165,7 +165,7 @@ try {
                 $message = 'Supplier added successfully.';
                 $tab = 'suppliers';
                 break;
-                
+
             case 'edit_supplier':
                 $id = (int)($_POST['id'] ?? 0);
                 $name = sanitizeInput($_POST['name'] ?? '');
@@ -174,11 +174,11 @@ try {
                 $email = sanitizeInput($_POST['email'] ?? '');
                 $address = sanitizeInput($_POST['address'] ?? '');
                 $isActive = isset($_POST['is_active']) ? 1 : 0;
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid supplier.');
                 }
-                
+
                 $stmt = $db->prepare("UPDATE suppliers SET 
                     supplier_name = ?, contact_person = ?, contact_phone = ?, 
                     email = ?, address = ?, is_active = ? 
@@ -187,21 +187,21 @@ try {
                 $message = 'Supplier updated successfully.';
                 $tab = 'suppliers';
                 break;
-                
+
             case 'delete_supplier':
                 $id = (int)($_POST['id'] ?? 0);
-                
+
                 if ($id <= 0) {
                     throw new Exception('Invalid supplier.');
                 }
-                
+
                 // Check if supplier is in use
                 $stmt = $db->prepare("SELECT COUNT(*) FROM purchases WHERE supplier_id = ?");
                 $stmt->execute([$id]);
                 if ($stmt->fetchColumn() > 0) {
                     throw new Exception('Cannot delete supplier - they have purchase records.');
                 }
-                
+
                 $stmt = $db->prepare("DELETE FROM suppliers WHERE supplier_id = ?");
                 $stmt->execute([$id]);
                 $message = 'Supplier deleted successfully.';
@@ -210,21 +210,9 @@ try {
         }
     }
 
-    // Get all data for the current tab
-    switch ($tab) {
-        case 'departments':
-            $departments = $db->query("SELECT * FROM departments ORDER BY department_name")->fetchAll();
-            break;
-            
-        case 'categories':
-            $categories = $db->query("SELECT * FROM drug_categories ORDER BY category_name")->fetchAll();
-            break;
-            
-        case 'suppliers':
-            $suppliers = $db->query("SELECT * FROM suppliers ORDER BY supplier_name")->fetchAll();
-            break;
-    }
-
+    $departments = $db->query("SELECT * FROM departments ORDER BY department_name")->fetchAll();
+    $categories = $db->query("SELECT * FROM drug_categories ORDER BY category_name")->fetchAll();
+    $suppliers = $db->query("SELECT * FROM suppliers ORDER BY supplier_name")->fetchAll();
 } catch (Exception $e) {
     $error = $e->getMessage();
 }
@@ -241,40 +229,40 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Alert Messages -->
     <?php if (!empty($message)): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($message) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($message) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
-    
+
     <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
     <!-- Tab Navigation -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">
         <li class="nav-item">
-            <a class="nav-link <?= $tab === 'departments' ? 'active' : '' ?>" 
-               id="departments-tab" data-toggle="tab" href="#departments" role="tab">
+            <a class="nav-link <?= $tab === 'departments' ? 'active' : '' ?>"
+                id="departments-tab" data-toggle="tab" href="#departments" role="tab">
                 Departments
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link <?= $tab === 'categories' ? 'active' : '' ?>" 
-               id="categories-tab" data-toggle="tab" href="#categories" role="tab">
+            <a class="nav-link <?= $tab === 'categories' ? 'active' : '' ?>"
+                id="categories-tab" data-toggle="tab" href="#categories" role="tab">
                 Drug Categories
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link <?= $tab === 'suppliers' ? 'active' : '' ?>" 
-               id="suppliers-tab" data-toggle="tab" href="#suppliers" role="tab">
+            <a class="nav-link <?= $tab === 'suppliers' ? 'active' : '' ?>"
+                id="suppliers-tab" data-toggle="tab" href="#suppliers" role="tab">
                 Suppliers
             </a>
         </li>
@@ -306,27 +294,42 @@ require_once __DIR__ . '/../includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($departments ?? [] as $dept): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($dept['department_name']) ?></td>
-                                    <td><?= htmlspecialchars($dept['location']) ?></td>
-                                    <td><?= htmlspecialchars($dept['contact_person']) ?></td>
-                                    <td><?= htmlspecialchars($dept['contact_phone']) ?></td>
-                                    <td>
-                                        <span class="badge badge-<?= $dept['is_active'] ? 'success' : 'danger' ?>">
-                                            <?= $dept['is_active'] ? 'Active' : 'Inactive' ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="showEditDepartmentModal(<?= $dept['department_id'] ?>, '<?= htmlspecialchars(addslashes($dept['department_name'])) ?>', '<?= htmlspecialchars(addslashes($dept['location'])) ?>', '<?= htmlspecialchars(addslashes($dept['contact_person'])) ?>', '<?= htmlspecialchars(addslashes($dept['contact_phone'])) ?>', <?= $dept['is_active'] ?>)">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-danger" 
-                                                onclick="confirmDelete('department', <?= $dept['department_id'] ?>, '<?= htmlspecialchars(addslashes($dept['department_name'])) ?>')">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
+                                    <tr>
+                                        <td><?= htmlspecialchars($dept['department_name']) ?></td>
+                                        <td><?= htmlspecialchars($dept['location']) ?></td>
+                                        <td><?= htmlspecialchars($dept['contact_person']) ?></td>
+                                        <td><?= htmlspecialchars($dept['contact_phone']) ?></td>
+                                        <td>
+                                            <span class="badge badge-<?= $dept['is_active'] ? 'success' : 'danger' ?>">
+                                                <?= $dept['is_active'] ? 'Active' : 'Inactive' ?>
+                                            </span>
+                                        </td>
+                                        <td class="text-center">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button class="btn btn-primary btn-sm"
+                                                    onclick="PharmacyModals.showDepartmentEditModal(
+                <?= $dept['department_id'] ?>, 
+                '<?= htmlspecialchars($dept['department_name'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($dept['location'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($dept['contact_person'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($dept['contact_phone'], ENT_QUOTES, 'UTF-8') ?>', 
+                <?= $dept['is_active'] ? 1 : 0 ?>
+            )"
+                                                    title="Edit Department">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn btn-danger btn-sm"
+                                                    onclick="PharmacyModals.showDeleteModal(
+                'department', 
+                <?= $dept['department_id'] ?>, 
+                '<?= htmlspecialchars($dept['department_name'], ENT_QUOTES, 'UTF-8') ?>'
+            )"
+                                                    title="Delete Department">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -356,20 +359,32 @@ require_once __DIR__ . '/../includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($categories ?? [] as $cat): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($cat['category_name']) ?></td>
-                                    <td><?= htmlspecialchars($cat['description']) ?></td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="showEditCategoryModal(<?= $cat['category_id'] ?>, '<?= htmlspecialchars(addslashes($cat['category_name'])) ?>', '<?= htmlspecialchars(addslashes($cat['description'])) ?>')">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-danger" 
-                                                onclick="confirmDelete('category', <?= $cat['category_id'] ?>, '<?= htmlspecialchars(addslashes($cat['category_name'])) ?>')">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
+                                    <tr>
+                                        <td><?= htmlspecialchars($cat['category_name']) ?></td>
+                                        <td><?= htmlspecialchars($cat['description']) ?></td>
+                                        <td class="text-center">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button class="btn btn-primary btn-sm"
+                                                    onclick="PharmacyModals.showCategoryEditModal(
+                <?= $cat['category_id'] ?>, 
+                '<?= htmlspecialchars($cat['category_name'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($cat['description'], ENT_QUOTES, 'UTF-8') ?>'
+            )"
+                                                    title="Edit Category">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn btn-danger btn-sm"
+                                                    onclick="PharmacyModals.showDeleteModal(
+                'category', 
+                <?= $cat['category_id'] ?>, 
+                '<?= htmlspecialchars($cat['category_name'], ENT_QUOTES, 'UTF-8') ?>'
+            )"
+                                                    title="Delete Category">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -402,27 +417,43 @@ require_once __DIR__ . '/../includes/header.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($suppliers ?? [] as $supplier): ?>
-                                <tr>
-                                    <td><?= htmlspecialchars($supplier['supplier_name']) ?></td>
-                                    <td><?= htmlspecialchars($supplier['contact_person']) ?></td>
-                                    <td><?= htmlspecialchars($supplier['contact_phone']) ?></td>
-                                    <td><?= htmlspecialchars($supplier['email']) ?></td>
-                                    <td>
-                                        <span class="badge badge-<?= $supplier['is_active'] ? 'success' : 'danger' ?>">
-                                            <?= $supplier['is_active'] ? 'Active' : 'Inactive' ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="showEditSupplierModal(<?= $supplier['supplier_id'] ?>, '<?= htmlspecialchars(addslashes($supplier['supplier_name'])) ?>', '<?= htmlspecialchars(addslashes($supplier['contact_person'])) ?>', '<?= htmlspecialchars(addslashes($supplier['contact_phone'])) ?>', '<?= htmlspecialchars(addslashes($supplier['email'])) ?>', '<?= htmlspecialchars(addslashes($supplier['address'])) ?>', <?= $supplier['is_active'] ?>)">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-danger" 
-                                                onclick="confirmDelete('supplier', <?= $supplier['supplier_id'] ?>, '<?= htmlspecialchars(addslashes($supplier['supplier_name'])) ?>')">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
+                                    <tr>
+                                        <td><?= htmlspecialchars($supplier['supplier_name']) ?></td>
+                                        <td><?= htmlspecialchars($supplier['contact_person']) ?></td>
+                                        <td><?= htmlspecialchars($supplier['contact_phone']) ?></td>
+                                        <td><?= htmlspecialchars($supplier['email']) ?></td>
+                                        <td>
+                                            <span class="badge badge-<?= $supplier['is_active'] ? 'success' : 'danger' ?>">
+                                                <?= $supplier['is_active'] ? 'Active' : 'Inactive' ?>
+                                            </span>
+                                        </td>
+                                        <td class="text-center">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button class="btn btn-primary btn-sm"
+                                                    onclick="PharmacyModals.showSupplierEditModal(
+                <?= $supplier['supplier_id'] ?>, 
+                '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($supplier['contact_person'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($supplier['contact_phone'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($supplier['email'], ENT_QUOTES, 'UTF-8') ?>', 
+                '<?= htmlspecialchars($supplier['address'], ENT_QUOTES, 'UTF-8') ?>', 
+                <?= $supplier['is_active'] ? 1 : 0 ?>
+            )"
+                                                    title="Edit Supplier">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn btn-danger btn-sm"
+                                                    onclick="PharmacyModals.showDeleteModal(
+                'supplier', 
+                <?= $supplier['supplier_id'] ?>, 
+                '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>'
+            )"
+                                                    title="Delete Supplier">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>

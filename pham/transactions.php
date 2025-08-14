@@ -14,7 +14,7 @@ $action = $_GET['action'] ?? '';
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $csrfToken = $_POST['csrf_token'] ?? '';
-    
+
     if (!verifyCsrfToken($csrfToken)) {
         $error = 'Invalid form submission.';
     } else {
@@ -23,74 +23,121 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 case 'add':
                     $drugId = (int)($_POST['drug_id'] ?? 0);
                     $departmentId = (int)($_POST['department_id'] ?? 0);
-                    $transactionType = in_array($_POST['transaction_type'], ['issue', 'return', 'adjustment', 'transfer']) 
-                        ? $_POST['transaction_type'] 
-                        : 'issue';
+                    $transactionType = $_POST['transaction_type'] === 'return' ? 'return' : 'sale';
                     $quantity = (int)($_POST['quantity'] ?? 0);
                     $referenceNumber = sanitizeInput($_POST['reference_number'] ?? '');
                     $notes = sanitizeInput($_POST['notes'] ?? '');
-                    $transferToDept = ($transactionType === 'transfer') ? (int)($_POST['transfer_to_department'] ?? 0) : null;
 
                     // Validate
                     if ($drugId <= 0 || $departmentId <= 0 || $quantity <= 0) {
                         throw new Exception('Drug, department and valid quantity are required.');
                     }
 
-                    if ($transactionType === 'transfer' && $transferToDept <= 0) {
-                        throw new Exception('Destination department is required for transfers.');
+                    // Check for near-expiry drugs before sale
+                    if ($transactionType === 'sale') {
+                        // First check stock availability
+                        $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory 
+                                            WHERE drug_id = ? AND department_id = ?");
+                        $stmt->execute([$drugId, $departmentId]);
+                        $stock = $stmt->fetchColumn();
+
+                        if ($stock === false) {
+                            throw new Exception('Not enough drugs in inventory');
+                        }
+
+                        if ($stock < $quantity) {
+                            throw new Exception('Not enough stock available. Only ' . $stock . ' units in stock.');
+                        }
+
+                        // Then check expiry dates
+                        $stmt = $db->prepare("SELECT expiry_date FROM inventory 
+                                            WHERE drug_id = ? AND department_id = ?
+                                            AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 10 DAY)
+                                            LIMIT 1");
+                        $stmt->execute([$drugId, $departmentId]);
+                        if ($stmt->fetch()) {
+                            throw new Exception('Cannot sell drugs expiring within 10 days');
+                        }
                     }
 
-                    // Begin transaction
                     $db->beginTransaction();
 
                     try {
-                        // For transfers, we need to handle both source and destination
-                        if ($transactionType === 'transfer') {
-                            // Check source inventory
+                        $unitPrice = null;
+                        $totalAmount = null;
+
+                        if ($transactionType === 'sale') {
+
                             $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory 
-                                                WHERE drug_id = ? AND department_id = ?");
+                        WHERE drug_id = ? AND department_id = ?");
                             $stmt->execute([$drugId, $departmentId]);
-                            $currentQty = $stmt->fetchColumn();
+                            $stock = $stmt->fetchColumn();
 
-                            if ($currentQty === false) {
-                                throw new Exception('Drug not found in source department inventory.');
+                            if ($stock === false) {
+                                throw new Exception('This drug is not available in the selected department.');
                             }
 
-                            if ($currentQty < $quantity) {
-                                throw new Exception('Not enough stock for transfer.');
+                            if ($stock <= 0) {
+                                throw new Exception('This drug is out of stock in the selected department.');
                             }
 
-                            // Update source inventory
+                            if ($stock < $quantity) {
+                                throw new Exception('Insufficient stock. Only ' . $stock . ' units available in this department.');
+                            }
+
+                            // Get current price
+                            $stmt = $db->prepare("SELECT unit_price FROM purchases 
+                                                WHERE drug_id = ? 
+                                                ORDER BY purchase_date DESC LIMIT 1");
+                            $stmt->execute([$drugId]);
+                            $unitPrice = $stmt->fetchColumn();
+
+                            if (!$unitPrice || $unitPrice <= 0) {
+                                throw new Exception('Valid unit price not found for this drug');
+                            }
+
+                            $totalAmount = $quantity * $unitPrice;
+
+                            // Deduct from inventory
                             $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock - ? 
-                                                  WHERE drug_id = ? AND department_id = ?");
+                                                WHERE drug_id = ? AND department_id = ?");
                             $stmt->execute([$quantity, $drugId, $departmentId]);
 
-                            // Update or create destination inventory
-                            $stmt = $db->prepare("INSERT INTO inventory 
-                                                (drug_id, department_id, quantity_in_stock)
-                                                VALUES (?, ?, ?)
-                                                ON DUPLICATE KEY UPDATE 
-                                                quantity_in_stock = quantity_in_stock + VALUES(quantity_in_stock)");
-                            $stmt->execute([$drugId, $transferToDept, $quantity]);
-                        } 
-                        // For other transaction types (issue, return, adjustment)
-                        else {
-                            $adjustment = ($transactionType === 'issue') ? -$quantity : $quantity;
-                            
+                            if ($stmt->rowCount() === 0) {
+                                throw new Exception('Drug not found in department inventory');
+                            }
+                        } else {
+                            // For returns, get the original sale price to calculate refund
+                            $stmt = $db->prepare("SELECT unit_price, total_amount FROM transactions 
+                                                WHERE drug_id = ? AND transaction_type = 'sale'
+                                                ORDER BY created_at DESC LIMIT 1");
+                            $stmt->execute([$drugId]);
+                            $sale = $stmt->fetch();
+
+                            if ($sale) {
+                                $unitPrice = $sale['unit_price'];
+                                $totalAmount = -1 * abs($quantity * $unitPrice);
+                            } else {
+                                // Fallback to purchase price if no sale record found
+                                $stmt = $db->prepare("SELECT unit_price FROM purchases 
+                                                    WHERE drug_id = ? 
+                                                    ORDER BY purchase_date DESC LIMIT 1");
+                                $stmt->execute([$drugId]);
+                                $unitPrice = $stmt->fetchColumn();
+                                $totalAmount = $unitPrice ? -1 * abs($quantity * $unitPrice) : null;
+                            }
+
+                            // Add to inventory
                             $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
                                                 WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$adjustment, $drugId, $departmentId]);
-
-                            if ($stmt->rowCount() === 0) {
-                                throw new Exception('Drug not found in department inventory.');
-                            }
+                            $stmt->execute([$quantity, $drugId, $departmentId]);
                         }
 
-                        // Record the transaction
+                        // Record transaction
                         $stmt = $db->prepare("INSERT INTO transactions 
                                             (drug_id, department_id, transaction_type, quantity, 
-                                            reference_number, notes, created_by, transfer_to_department)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                                            reference_number, notes, created_by, unit_price, total_amount)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
                         $stmt->execute([
                             $drugId,
                             $departmentId,
@@ -99,7 +146,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $referenceNumber ?: null,
                             $notes ?: null,
                             $auth->getCurrentUser()['user_id'],
-                            $transferToDept
+                            $unitPrice,
+                            $totalAmount
                         ]);
 
                         $db->commit();
@@ -113,12 +161,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 case 'delete':
                     $transactionId = (int)($_POST['transaction_id'] ?? 0);
 
-                    // Validate
                     if ($transactionId <= 0) {
                         throw new Exception('Invalid transaction ID.');
                     }
 
-                    // Get transaction details
                     $stmt = $db->prepare("SELECT * FROM transactions WHERE transaction_id = ?");
                     $stmt->execute([$transactionId]);
                     $transaction = $stmt->fetch();
@@ -127,30 +173,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception('Transaction not found.');
                     }
 
-                    // Begin transaction
                     $db->beginTransaction();
 
                     try {
-                        // Reverse the transaction
-                        if ($transaction['transaction_type'] === 'transfer') {
-                            // Return quantity to source department
-                            $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
-                                                WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$transaction['quantity'], $transaction['drug_id'], $transaction['department_id']]);
+                        // Reverse inventory changes
+                        $adjustment = ($transaction['transaction_type'] === 'sale')
+                            ? $transaction['quantity']
+                            : -$transaction['quantity'];
 
-                            // Remove from destination department
-                            $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock - ? 
-                                                WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$transaction['quantity'], $transaction['drug_id'], $transaction['transfer_to_department']]);
-                        } else {
-                            $adjustment = ($transaction['transaction_type'] === 'issue') ? $transaction['quantity'] : -$transaction['quantity'];
-                            
-                            $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
-                                                WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$adjustment, $transaction['drug_id'], $transaction['department_id']]);
-                        }
+                        $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
+                                            WHERE drug_id = ? AND department_id = ?");
+                        $stmt->execute([
+                            $adjustment,
+                            $transaction['drug_id'],
+                            $transaction['department_id']
+                        ]);
 
-                        // Delete the transaction record
+                        // Delete the transaction
                         $stmt = $db->prepare("DELETE FROM transactions WHERE transaction_id = ?");
                         $stmt->execute([$transactionId]);
 
@@ -168,7 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get all transactions with related data
+// Get transactions with financial data
 $transactions = $db->query("
     SELECT t.*, 
            d.drug_name,
@@ -183,7 +222,16 @@ $transactions = $db->query("
     ORDER BY t.created_at DESC
 ")->fetchAll();
 
-// Get drugs and departments for dropdowns
+// Get financial summary data
+$salesData = $db->query("
+    SELECT 
+        SUM(CASE WHEN transaction_type = 'sale' THEN total_amount ELSE 0 END) as total_sales,
+        ABS(SUM(CASE WHEN transaction_type = 'return' THEN total_amount ELSE 0 END)) as total_returns,
+        SUM(total_amount) as net_sales
+    FROM transactions
+    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+")->fetch();
+
 $drugs = $db->query("SELECT drug_id, drug_name FROM drugs WHERE is_active = 1 ORDER BY drug_name")->fetchAll();
 $departments = $db->query("SELECT department_id, department_name FROM departments WHERE is_active = 1 ORDER BY department_name")->fetchAll();
 
@@ -192,7 +240,6 @@ require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="container-fluid mt-4">
-    <!-- Page Heading -->
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 text-gray-800">Transaction Management</h1>
         <button class="btn btn-primary" data-toggle="modal" data-target="#addTransactionModal">
@@ -200,26 +247,24 @@ require_once __DIR__ . '/../includes/header.php';
         </button>
     </div>
 
-    <!-- Alert Messages -->
     <?php if (!empty($message)): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($message) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
-    <?php endif; ?>
-    
-    <?php if (!empty($error)): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($error) ?>
-        <button type="button" class="close" data-dismiss="alert">
-            <span>&times;</span>
-        </button>
-    </div>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($message) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
     <?php endif; ?>
 
-    <!-- Transactions Summary Cards -->
+    <?php if (!empty($error)): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="close" data-dismiss="alert">
+                <span>&times;</span>
+            </button>
+        </div>
+    <?php endif; ?>
+
     <div class="row">
         <!-- Total Transactions Card -->
         <div class="col-xl-3 col-md-6 mb-4">
@@ -240,40 +285,20 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
 
-        <!-- Today's Transactions Card -->
+        <!-- Sales Card -->
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-success shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
-                                Today's Transactions</div>
+                                Sales (Last 7 Days)</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                <?= $db->query("SELECT COUNT(*) FROM transactions WHERE DATE(created_at) = CURDATE()")->fetchColumn() ?>
-                            </div>
+                                <?= number_format($salesData['total_sales'] ?? 0, 0) ?></div>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-calendar-day fa-2x text-gray-300"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+                            <span class="text-gray-300" style="font-size: 1.5rem; font-weight: bold;">UGX</span>
 
-        <!-- Issues Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-danger shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
-                                Issues (Last 7 Days)</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                <?= $db->query("SELECT COUNT(*) FROM transactions WHERE transaction_type = 'issue' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")->fetchColumn() ?>
-                            </div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-arrow-down fa-2x text-gray-300"></i>
                         </div>
                     </div>
                 </div>
@@ -282,200 +307,222 @@ require_once __DIR__ . '/../includes/header.php';
 
         <!-- Returns Card -->
         <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-danger shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                Returns (Last 7 Days)</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                <?= number_format(abs($salesData['total_returns'] ?? 0), 0) ?></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-undo fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Net Sales Card -->
+        <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-info shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                                Returns (Last 7 Days)</div>
+                                Net Sales (Last 7 Days)</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                <?= $db->query("SELECT COUNT(*) FROM transactions WHERE transaction_type = 'return' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")->fetchColumn() ?>
-                            </div>
+                                <?= number_format($salesData['net_sales'] ?? 0, 0) ?></div>
                         </div>
                         <div class="col-auto">
-                            <i class="fas fa-arrow-up fa-2x text-gray-300"></i>
+                            <i class="fas fa-calculator fa-2x text-gray-300"></i>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Transactions Table -->
+    <!-- Sales and Returns Table -->
     <div class="card shadow mb-4">
         <div class="card-header py-3">
-            <h6 class="m-0 font-weight-bold text-primary">Recent Transactions</h6>
+            <h6 class="m-0 font-weight-bold text-primary">Sales & Returns</h6>
         </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table table-bordered table-hover" id="transactionsTable" width="100%" cellspacing="0">
+                <table class="table table-bordered table-hover" id="salesTable" width="100%" cellspacing="0">
                     <thead class="thead-light">
                         <tr>
                             <th>Date</th>
                             <th>Drug</th>
                             <th>Type</th>
-                            <th>Quantity</th>
-                            <th>From</th>
-                            <th>To</th>
+                            <th>Qty</th>
+                            <th>Unit Price</th>
+                            <th>Amount</th>
+                            <th>Department</th>
                             <th>Reference</th>
                             <th>User</th>
-                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($transactions as $txn): ?>
-                        <tr>
-                            <td><?= formatDateTime($txn['created_at']) ?></td>
-                            <td><?= htmlspecialchars($txn['drug_name']) ?></td>
-                            <td>
-                                <span class="badge badge-<?= 
-                                    $txn['transaction_type'] === 'issue' ? 'danger' : 
-                                    ($txn['transaction_type'] === 'return' ? 'success' : 
-                                    ($txn['transaction_type'] === 'transfer' ? 'info' : 'warning')) 
-                                ?>">
-                                    <?= ucfirst($txn['transaction_type']) ?>
-                                </span>
-                            </td>
-                            <td><?= $txn['quantity'] ?></td>
-                            <td><?= htmlspecialchars($txn['from_department']) ?></td>
-                            <td><?= htmlspecialchars($txn['to_department'] ?? 'N/A') ?></td>
-                            <td><?= htmlspecialchars($txn['reference_number'] ?? '') ?></td>
-                            <td><?= htmlspecialchars($txn['created_by_name']) ?></td>
-                            <td class="text-center">
-                                <button class="btn btn-danger btn-sm" 
-                                        onclick="confirmDelete(<?= $txn['transaction_id'] ?>, '<?= htmlspecialchars(addslashes($txn['drug_name'])) ?>')">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
-                            </td>
-                        </tr>
+                            <?php if (in_array($txn['transaction_type'], ['sale', 'return'])): ?>
+                                <tr>
+                                    <td><?= formatDateTime($txn['created_at']) ?></td>
+                                    <td><?= htmlspecialchars($txn['drug_name']) ?></td>
+                                    <td>
+                                        <span class="badge badge-<?= $txn['transaction_type'] === 'sale' ? 'success' : 'danger' ?>">
+                                            <?= ucfirst($txn['transaction_type']) ?>
+                                        </span>
+                                    </td>
+                                    <td><?= $txn['quantity'] ?></td>
+                                    <td><?= isset($txn['unit_price']) ? number_format($txn['unit_price'], 0) : 'N/A' ?></td>
+                                    <td class="<?= $txn['transaction_type'] === 'return' ? 'text-danger' : 'text-success' ?>">
+                                        <?= isset($txn['total_amount']) ? number_format($txn['total_amount'], 0) : 'N/A' ?>
+                                    </td>
+                                    <td><?= htmlspecialchars($txn['from_department']) ?></td>
+                                    <td><?= htmlspecialchars($txn['reference_number'] ?? 'N/A') ?></td>
+                                    <td><?= htmlspecialchars($txn['created_by_name']) ?></td>
+                                </tr>
+                            <?php endif; ?>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Add Transaction Modal -->
-<div class="modal fade" id="addTransactionModal" tabindex="-1" role="dialog" aria-labelledby="addTransactionModalLabel" aria-hidden="true" style="z-index: 1050;">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="addTransactionModalLabel">Record New Transaction</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
+    <!-- Inventory Movements Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Inventory Movements</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover" id="inventoryTable" width="100%" cellspacing="0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>Date</th>
+                            <th>Drug</th>
+                            <th>Type</th>
+                            <th>Qty</th>
+                            <th>From Dept</th>
+                            <th>To Dept</th>
+                            <th>Reference</th>
+                            <th>Notes</th>
+                            <th>User</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($transactions as $txn): ?>
+                            <?php if (in_array($txn['transaction_type'], ['stock_receive', 'stock_adjust_in', 'stock_adjust_out', 'stock_transfer'])): ?>
+                                <tr>
+                                    <td><?= formatDateTime($txn['created_at']) ?></td>
+                                    <td><?= htmlspecialchars($txn['drug_name']) ?></td>
+                                    <td>
+                                        <?php
+                                        $badgeClass = [
+                                            'stock_receive' => 'success',
+                                            'stock_adjust_in' => 'warning',
+                                            'stock_adjust_out' => 'danger',
+                                            'stock_transfer' => 'secondary'
+                                        ][$txn['transaction_type']] ?? 'secondary';
+                                        ?>
+                                        <span class="badge badge-<?= $badgeClass ?>">
+                                            <?= str_replace('_', ' ', ucfirst($txn['transaction_type'])) ?>
+                                        </span>
+                                    </td>
+                                    <td><?= $txn['quantity'] ?></td>
+                                    <td><?= htmlspecialchars($txn['from_department']) ?></td>
+                                    <td><?= htmlspecialchars($txn['to_department'] ?? 'N/A') ?></td>
+                                    <td><?= htmlspecialchars($txn['reference_number'] ?? 'N/A') ?></td>
+                                    <td><?= htmlspecialchars($txn['notes'] ?? '') ?></td>
+                                    <td><?= htmlspecialchars($txn['created_by_name']) ?></td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
-            <form method="post" action="?action=add">
-                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnDrug">Drug *</label>
-                                <select class="form-control" id="txnDrug" name="drug_id" required>
-                                    <option value="">-- Select Drug --</option>
-                                    <?php foreach ($drugs as $drug): ?>
-                                    <option value="<?= $drug['drug_id'] ?>"><?= htmlspecialchars($drug['drug_name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnDepartment">Department *</label>
-                                <select class="form-control" id="txnDepartment" name="department_id" required>
-                                    <option value="">-- Select Department --</option>
-                                    <?php foreach ($departments as $dept): ?>
-                                    <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnType">Transaction Type *</label>
-                                <select class="form-control" id="txnType" name="transaction_type" required>
-                                    <option value="issue">Issue</option>
-                                    <option value="return">Return</option>
-                                    <option value="adjustment">Adjustment</option>
-                                    <option value="transfer">Transfer</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnQuantity">Quantity *</label>
-                                <input type="number" class="form-control" id="txnQuantity" name="quantity" min="1" value="1" required>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row" id="transferDeptRow" style="display: none;">
-                        <div class="col-md-12">
-                            <div class="form-group">
-                                <label for="txnTransferTo">Transfer To Department *</label>
-                                <select class="form-control" id="txnTransferTo" name="transfer_to_department">
-                                    <option value="">-- Select Department --</option>
-                                    <?php foreach ($departments as $dept): ?>
-                                    <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnReference">Reference Number</label>
-                                <input type="text" class="form-control" id="txnReference" name="reference_number">
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="txnNotes">Notes</label>
-                                <input type="text" class="form-control" id="txnNotes" name="notes">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Record Transaction</button>
-                </div>
-            </form>
         </div>
     </div>
-</div>
 
-<!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModalLabel" aria-hidden="true" style="z-index: 1051;">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="deleteModalLabel">Confirm Transaction Deletion</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
+    <!-- Add Transaction Modal -->
+    <div class="modal fade" id="addTransactionModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record New Transaction</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form method="post" action="?action=add">
+                    <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Transaction Type *</label>
+                            <select class="form-control" name="transaction_type" required>
+                                <option value="sale">Sale to Customer</option>
+                                <option value="return">Return to Inventory</option>
+                            </select>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Drug *</label>
+                                    <select class="form-control" name="drug_id" required>
+                                        <option value="">-- Select Drug --</option>
+                                        <?php foreach ($drugs as $drug): ?>
+                                            <option value="<?= $drug['drug_id'] ?>"><?= htmlspecialchars($drug['drug_name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Department *</label>
+                                    <select class="form-control" name="department_id" required>
+                                        <option value="">-- Select Department --</option>
+                                        <?php foreach ($departments as $dept): ?>
+                                            <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Quantity *</label>
+                                    <input type="number" class="form-control" name="quantity" min="1" required>
+                                    <small class="form-text text-muted stock-info">
+                                        Available stock: <span class="available-stock">Select drug and department first</span>
+                                    </small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Reference Number</label>
+                                    <input type="text" class="form-control" name="reference_number">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea class="form-control" name="notes" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Record Transaction</button>
+                    </div>
+                </form>
             </div>
-            <form method="post" action="?action=delete">
-                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                <input type="hidden" id="deleteTransactionId" name="transaction_id">
-                <div class="modal-body">
-                    <p>Are you sure you want to delete this transaction?</p>
-                    <p class="text-danger">This will reverse the inventory changes made by this transaction.</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger">Delete Transaction</button>
-                </div>
-            </form>
         </div>
     </div>
-</div>
 
-<?php require_once __DIR__ . '/../includes/footer.php'; ?>
+    <?php require_once __DIR__ . '/../includes/footer.php'; ?>
