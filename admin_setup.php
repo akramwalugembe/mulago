@@ -26,7 +26,6 @@ $adminDetails = [
     'password' => 'SecurePharmacy@2025',
     'full_name' => 'System Administrator',
     'email' => 'admin@mulagopharmacy.com',
-    'department' => 'Main Pharmacy',
     'role' => 'admin'
 ];
 
@@ -59,27 +58,12 @@ $adminDetails = [
             // Start transaction
             $db->beginTransaction();
 
-            // 1. Create department if not exists
-            $stmt = $db->prepare("INSERT IGNORE INTO departments 
-                                (department_name, location, contact_person, contact_phone) 
-                                VALUES (?, 'Main Building', 'Head Pharmacist', '+256700000000')");
-            $stmt->execute([$adminDetails['department']]);
-            
-            // Get department ID
-            $stmt = $db->prepare("SELECT department_id FROM departments WHERE department_name = ? LIMIT 1");
-            $stmt->execute([$adminDetails['department']]);
-            $deptId = $stmt->fetchColumn();
-
-            if (!$deptId) {
-                throw new Exception("Failed to create or find department");
-            }
-
             // 2. Create admin user with hashed password
             $passwordHash = password_hash($adminDetails['password'], PASSWORD_BCRYPT, ['cost' => 12]);
             
             $stmt = $db->prepare("INSERT INTO users 
-                                (username, password_hash, full_name, email, department_id, role, is_active) 
-                                VALUES (?, ?, ?, ?, ?, ?, 1)
+                                (username, password_hash, full_name, email, role, is_active) 
+                                VALUES (?, ?, ?, ?, ?, 1)
                                 ON DUPLICATE KEY UPDATE 
                                 password_hash = VALUES(password_hash),
                                 is_active = 1,
@@ -90,7 +74,6 @@ $adminDetails = [
                 $passwordHash,
                 $adminDetails['full_name'],
                 $adminDetails['email'],
-                $deptId,
                 $adminDetails['role']
             ]);
 

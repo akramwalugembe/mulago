@@ -2,8 +2,14 @@
 require_once __DIR__ . '/../includes/init.php';
 
 $auth = new Auth();
+if (!$auth->isLoggedIn()) {
+    redirect('../auth/login.php');
+}
 if (!$auth->isLoggedIn() || !in_array($auth->getCurrentUser()['role'], ['admin', 'pharmacist'])) {
-    die('Access denied. You do not have permission to view this page.');
+    $_SESSION['flash_message'] = 'Access denied. You need higher privileges.';
+    header('Location: index.php');
+    exit();
+    // die('Access denied. You do not have permission to view this page.');
 }
 
 $db = db();
@@ -22,23 +28,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             switch ($action) {
                 case 'add':
                     $drugId = (int)($_POST['drug_id'] ?? 0);
-                    $departmentId = (int)($_POST['department_id'] ?? 0);
                     $transactionType = $_POST['transaction_type'] === 'return' ? 'return' : 'sale';
                     $quantity = (int)($_POST['quantity'] ?? 0);
                     $referenceNumber = sanitizeInput($_POST['reference_number'] ?? '');
                     $notes = sanitizeInput($_POST['notes'] ?? '');
 
                     // Validate
-                    if ($drugId <= 0 || $departmentId <= 0 || $quantity <= 0) {
-                        throw new Exception('Drug, department and valid quantity are required.');
+                    if ($drugId <= 0 || $quantity <= 0) {
+                        throw new Exception('Drug and valid quantity are required.');
                     }
 
                     // Check for near-expiry drugs before sale
                     if ($transactionType === 'sale') {
                         // First check stock availability
                         $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory 
-                                            WHERE drug_id = ? AND department_id = ?");
-                        $stmt->execute([$drugId, $departmentId]);
+                                            WHERE drug_id = ?");
+                        $stmt->execute([$drugId]);
                         $stock = $stmt->fetchColumn();
 
                         if ($stock === false) {
@@ -51,10 +56,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // Then check expiry dates
                         $stmt = $db->prepare("SELECT expiry_date FROM inventory 
-                                            WHERE drug_id = ? AND department_id = ?
+                                            WHERE drug_id = ?
                                             AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 10 DAY)
                                             LIMIT 1");
-                        $stmt->execute([$drugId, $departmentId]);
+                        $stmt->execute([$drugId]);
                         if ($stmt->fetch()) {
                             throw new Exception('Cannot sell drugs expiring within 10 days');
                         }
@@ -69,8 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($transactionType === 'sale') {
 
                             $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory 
-                        WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$drugId, $departmentId]);
+                        WHERE drug_id = ?");
+                            $stmt->execute([$drugId]);
                             $stock = $stmt->fetchColumn();
 
                             if ($stock === false) {
@@ -100,8 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                             // Deduct from inventory
                             $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock - ? 
-                                                WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$quantity, $drugId, $departmentId]);
+                                                WHERE drug_id = ?");
+                            $stmt->execute([$quantity, $drugId]);
 
                             if ($stmt->rowCount() === 0) {
                                 throw new Exception('Drug not found in department inventory');
@@ -129,18 +134,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                             // Add to inventory
                             $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
-                                                WHERE drug_id = ? AND department_id = ?");
-                            $stmt->execute([$quantity, $drugId, $departmentId]);
+                                                WHERE drug_id = ?");
+                            $stmt->execute([$quantity, $drugId]);
                         }
 
                         // Record transaction
                         $stmt = $db->prepare("INSERT INTO transactions 
-                                            (drug_id, department_id, transaction_type, quantity, 
+                                            (drug_id, transaction_type, quantity, 
                                             reference_number, notes, created_by, unit_price, total_amount)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
                         $stmt->execute([
                             $drugId,
-                            $departmentId,
                             $transactionType,
                             $quantity,
                             $referenceNumber ?: null,
@@ -182,11 +186,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             : -$transaction['quantity'];
 
                         $stmt = $db->prepare("UPDATE inventory SET quantity_in_stock = quantity_in_stock + ? 
-                                            WHERE drug_id = ? AND department_id = ?");
+                                            WHERE drug_id = ?");
                         $stmt->execute([
                             $adjustment,
                             $transaction['drug_id'],
-                            $transaction['department_id']
                         ]);
 
                         // Delete the transaction
@@ -211,13 +214,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $transactions = $db->query("
     SELECT t.*, 
            d.drug_name,
-           dept.department_name as from_department,
-           dept2.department_name as to_department,
            u.full_name as created_by_name
     FROM transactions t
     JOIN drugs d ON t.drug_id = d.drug_id
-    JOIN departments dept ON t.department_id = dept.department_id
-    LEFT JOIN departments dept2 ON t.transfer_to_department = dept2.department_id
     JOIN users u ON t.created_by = u.user_id
     ORDER BY t.created_at DESC
 ")->fetchAll();
@@ -233,7 +232,6 @@ $salesData = $db->query("
 ")->fetch();
 
 $drugs = $db->query("SELECT drug_id, drug_name FROM drugs WHERE is_active = 1 ORDER BY drug_name")->fetchAll();
-$departments = $db->query("SELECT department_id, department_name FROM departments WHERE is_active = 1 ORDER BY department_name")->fetchAll();
 
 $csrfToken = generateCsrfToken();
 require_once __DIR__ . '/../includes/header.php';
@@ -242,7 +240,7 @@ require_once __DIR__ . '/../includes/header.php';
 <div class="container-fluid mt-4">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 text-gray-800">Transaction Management</h1>
-        <button class="btn btn-primary" data-toggle="modal" data-target="#addTransactionModal">
+        <button class="btn btn-primary" data-toggle="modal" data-target="#addTransactionModal" <?= ($auth->isLoggedIn() && $auth->getCurrentUser()['role'] === 'admin') ? 'disabled' : '' ?>>
             <i class="fas fa-plus"></i> Record Transaction
         </button>
     </div>
@@ -265,6 +263,7 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
     <?php endif; ?>
 
+    <?php if ($auth->isLoggedIn() && $auth->getCurrentUser()['role'] === 'admin'): ?>
     <div class="row">
         <!-- Total Transactions Card -->
         <div class="col-xl-3 col-md-6 mb-4">
@@ -343,6 +342,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
     <!-- Sales and Returns Table -->
     <div class="card shadow mb-4">
         <div class="card-header py-3">
@@ -359,7 +359,6 @@ require_once __DIR__ . '/../includes/header.php';
                             <th>Qty</th>
                             <th>Unit Price</th>
                             <th>Amount</th>
-                            <th>Department</th>
                             <th>Reference</th>
                             <th>User</th>
                         </tr>
@@ -380,7 +379,6 @@ require_once __DIR__ . '/../includes/header.php';
                                     <td class="<?= $txn['transaction_type'] === 'return' ? 'text-danger' : 'text-success' ?>">
                                         <?= isset($txn['total_amount']) ? number_format($txn['total_amount'], 0) : 'N/A' ?>
                                     </td>
-                                    <td><?= htmlspecialchars($txn['from_department']) ?></td>
                                     <td><?= htmlspecialchars($txn['reference_number'] ?? 'N/A') ?></td>
                                     <td><?= htmlspecialchars($txn['created_by_name']) ?></td>
                                 </tr>
@@ -406,8 +404,6 @@ require_once __DIR__ . '/../includes/header.php';
                             <th>Drug</th>
                             <th>Type</th>
                             <th>Qty</th>
-                            <th>From Dept</th>
-                            <th>To Dept</th>
                             <th>Reference</th>
                             <th>Notes</th>
                             <th>User</th>
@@ -433,8 +429,6 @@ require_once __DIR__ . '/../includes/header.php';
                                         </span>
                                     </td>
                                     <td><?= $txn['quantity'] ?></td>
-                                    <td><?= htmlspecialchars($txn['from_department']) ?></td>
-                                    <td><?= htmlspecialchars($txn['to_department'] ?? 'N/A') ?></td>
                                     <td><?= htmlspecialchars($txn['reference_number'] ?? 'N/A') ?></td>
                                     <td><?= htmlspecialchars($txn['notes'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($txn['created_by_name']) ?></td>
@@ -482,20 +476,6 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
                             <div class="col-md-6">
                                 <div class="form-group">
-                                    <label>Department *</label>
-                                    <select class="form-control" name="department_id" required>
-                                        <option value="">-- Select Department --</option>
-                                        <?php foreach ($departments as $dept): ?>
-                                            <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
                                     <label>Quantity *</label>
                                     <input type="number" class="form-control" name="quantity" min="1" required>
                                     <small class="form-text text-muted stock-info">
@@ -503,13 +483,16 @@ require_once __DIR__ . '/../includes/header.php';
                                     </small>
                                 </div>
                             </div>
+                        </div>
+
+                        <div class="row">
+   
                             <div class="col-md-6">
                                 <div class="form-group">
                                     <label>Reference Number</label>
                                     <input type="text" class="form-control" name="reference_number">
                                 </div>
                             </div>
-                        </div>
 
                         <div class="form-group">
                             <label>Notes</label>

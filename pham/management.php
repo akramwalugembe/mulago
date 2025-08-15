@@ -8,13 +8,16 @@ if (!$auth->isLoggedIn()) {
 
 // Check permissions
 $currentUser = $auth->getCurrentUser();
-if (!in_array($currentUser['role'], ['admin', 'pharmacist'])) {
-    die('Access denied. You do not have permission to view this page.');
+if (!in_array($currentUser['role'], ['admin', 'department_staff'])) {
+    $_SESSION['flash_message'] = 'Access denied. You need higher privileges.';
+    header('Location: index.php');
+    exit();
+    // die('Access denied. You do not have permission to view this page.');
 }
 
 $db = db();
 $action = $_GET['action'] ?? '';
-$tab = $_GET['tab'] ?? 'departments';
+$tab = $_GET['tab'] ?? 'categories';
 $message = '';
 $error = '';
 
@@ -27,72 +30,6 @@ try {
         }
 
         switch ($action) {
-            // Department actions
-            case 'add_department':
-                $name = sanitizeInput($_POST['name'] ?? '');
-                $location = sanitizeInput($_POST['location'] ?? '');
-                $contactPerson = sanitizeInput($_POST['contact_person'] ?? '');
-                $contactPhone = sanitizeInput($_POST['contact_phone'] ?? '');
-
-                if (empty($name)) {
-                    throw new Exception('Department name is required.');
-                }
-
-                $stmt = $db->prepare("INSERT INTO departments 
-                    (department_name, location, contact_person, contact_phone) 
-                    VALUES (?, ?, ?, ?)");
-                $stmt->execute([$name, $location, $contactPerson, $contactPhone]);
-                $message = 'Department added successfully.';
-                $tab = 'departments';
-                break;
-
-            case 'edit_department':
-                $id = (int)($_POST['id'] ?? 0);
-                $name = sanitizeInput($_POST['name'] ?? '');
-                $location = sanitizeInput($_POST['location'] ?? '');
-                $contactPerson = sanitizeInput($_POST['contact_person'] ?? '');
-                $contactPhone = sanitizeInput($_POST['contact_phone'] ?? '');
-                $isActive = isset($_POST['is_active']) ? 1 : 0;
-
-                if ($id <= 0) {
-                    throw new Exception('Invalid department.');
-                }
-
-                $stmt = $db->prepare("UPDATE departments SET 
-                    department_name = ?, location = ?, contact_person = ?, 
-                    contact_phone = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP 
-                    WHERE department_id = ?");
-                $stmt->execute([$name, $location, $contactPerson, $contactPhone, $isActive, $id]);
-                $message = 'Department updated successfully.';
-                $tab = 'departments';
-                break;
-
-            case 'delete_department':
-                $id = (int)($_POST['id'] ?? 0);
-
-                if ($id <= 0) {
-                    throw new Exception('Invalid department.');
-                }
-
-                // Check if department is in use
-                $stmt = $db->prepare("SELECT COUNT(*) FROM inventory WHERE department_id = ?");
-                $stmt->execute([$id]);
-                if ($stmt->fetchColumn() > 0) {
-                    throw new Exception('Cannot delete department - it has inventory items.');
-                }
-
-                $stmt = $db->prepare("SELECT COUNT(*) FROM users WHERE department_id = ?");
-                $stmt->execute([$id]);
-                if ($stmt->fetchColumn() > 0) {
-                    throw new Exception('Cannot delete department - it has assigned users.');
-                }
-
-                $stmt = $db->prepare("DELETE FROM departments WHERE department_id = ?");
-                $stmt->execute([$id]);
-                $message = 'Department deleted successfully.';
-                $tab = 'departments';
-                break;
-
             // Category actions
             case 'add_category':
                 $name = sanitizeInput($_POST['name'] ?? '');
@@ -210,7 +147,6 @@ try {
         }
     }
 
-    $departments = $db->query("SELECT * FROM departments ORDER BY department_name")->fetchAll();
     $categories = $db->query("SELECT * FROM drug_categories ORDER BY category_name")->fetchAll();
     $suppliers = $db->query("SELECT * FROM suppliers ORDER BY supplier_name")->fetchAll();
 } catch (Exception $e) {
@@ -249,12 +185,6 @@ require_once __DIR__ . '/../includes/header.php';
     <!-- Tab Navigation -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">
         <li class="nav-item">
-            <a class="nav-link <?= $tab === 'departments' ? 'active' : '' ?>"
-                id="departments-tab" data-toggle="tab" href="#departments" role="tab">
-                Departments
-            </a>
-        </li>
-        <li class="nav-item">
             <a class="nav-link <?= $tab === 'categories' ? 'active' : '' ?>"
                 id="categories-tab" data-toggle="tab" href="#categories" role="tab">
                 Drug Categories
@@ -270,74 +200,6 @@ require_once __DIR__ . '/../includes/header.php';
 
     <!-- Tab Content -->
     <div class="tab-content" id="managementTabsContent">
-        <!-- Departments Tab -->
-        <div class="tab-pane fade <?= $tab === 'departments' ? 'show active' : '' ?>" id="departments" role="tabpanel">
-            <div class="card shadow mt-4">
-                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">Departments</h6>
-                    <button class="btn btn-primary btn-sm" data-toggle="modal" data-target="#addDepartmentModal">
-                        <i class="fas fa-plus"></i> Add Department
-                    </button>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-bordered" id="departmentsTable">
-                            <thead class="thead-light">
-                                <tr>
-                                    <th>Department Name</th>
-                                    <th>Location</th>
-                                    <th>Contact Person</th>
-                                    <th>Contact Phone</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($departments ?? [] as $dept): ?>
-                                    <tr>
-                                        <td><?= htmlspecialchars($dept['department_name']) ?></td>
-                                        <td><?= htmlspecialchars($dept['location']) ?></td>
-                                        <td><?= htmlspecialchars($dept['contact_person']) ?></td>
-                                        <td><?= htmlspecialchars($dept['contact_phone']) ?></td>
-                                        <td>
-                                            <span class="badge badge-<?= $dept['is_active'] ? 'success' : 'danger' ?>">
-                                                <?= $dept['is_active'] ? 'Active' : 'Inactive' ?>
-                                            </span>
-                                        </td>
-                                        <td class="text-center">
-                                            <div class="btn-group btn-group-sm" role="group">
-                                                <button class="btn btn-primary btn-sm"
-                                                    onclick="PharmacyModals.showDepartmentEditModal(
-                <?= $dept['department_id'] ?>, 
-                '<?= htmlspecialchars($dept['department_name'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($dept['location'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($dept['contact_person'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($dept['contact_phone'], ENT_QUOTES, 'UTF-8') ?>', 
-                <?= $dept['is_active'] ? 1 : 0 ?>
-            )"
-                                                    title="Edit Department">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="btn btn-danger btn-sm"
-                                                    onclick="PharmacyModals.showDeleteModal(
-                'department', 
-                <?= $dept['department_id'] ?>, 
-                '<?= htmlspecialchars($dept['department_name'], ENT_QUOTES, 'UTF-8') ?>'
-            )"
-                                                    title="Delete Department">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Categories Tab -->
         <div class="tab-pane fade <?= $tab === 'categories' ? 'show active' : '' ?>" id="categories" role="tabpanel">
             <div class="card shadow mt-4">
@@ -431,23 +293,23 @@ require_once __DIR__ . '/../includes/header.php';
                                             <div class="btn-group btn-group-sm" role="group">
                                                 <button class="btn btn-primary btn-sm"
                                                     onclick="PharmacyModals.showSupplierEditModal(
-                <?= $supplier['supplier_id'] ?>, 
-                '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($supplier['contact_person'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($supplier['contact_phone'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($supplier['email'], ENT_QUOTES, 'UTF-8') ?>', 
-                '<?= htmlspecialchars($supplier['address'], ENT_QUOTES, 'UTF-8') ?>', 
-                <?= $supplier['is_active'] ? 1 : 0 ?>
-            )"
+                                                        <?= $supplier['supplier_id'] ?>, 
+                                                        '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>', 
+                                                        '<?= htmlspecialchars($supplier['contact_person'], ENT_QUOTES, 'UTF-8') ?>', 
+                                                        '<?= htmlspecialchars($supplier['contact_phone'], ENT_QUOTES, 'UTF-8') ?>', 
+                                                        '<?= htmlspecialchars($supplier['email'], ENT_QUOTES, 'UTF-8') ?>', 
+                                                        '<?= htmlspecialchars($supplier['address'], ENT_QUOTES, 'UTF-8') ?>', 
+                                                        <?= $supplier['is_active'] ? 1 : 0 ?>
+                                                    )"
                                                     title="Edit Supplier">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
                                                 <button class="btn btn-danger btn-sm"
                                                     onclick="PharmacyModals.showDeleteModal(
-                'supplier', 
-                <?= $supplier['supplier_id'] ?>, 
-                '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>'
-            )"
+                                                        'supplier', 
+                                                        <?= $supplier['supplier_id'] ?>, 
+                                                        '<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES, 'UTF-8') ?>'
+                                                    )"
                                                     title="Delete Supplier">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
@@ -460,89 +322,6 @@ require_once __DIR__ . '/../includes/header.php';
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- Add Department Modal -->
-<div class="modal fade" id="addDepartmentModal" tabindex="-1" role="dialog" aria-hidden="true" style="z-index: 1050;">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add New Department</h5>
-                <button type="button" class="close" data-dismiss="modal">
-                    <span>&times;</span>
-                </button>
-            </div>
-            <form method="post" action="?action=add_department&tab=departments">
-                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="deptName">Department Name *</label>
-                        <input type="text" class="form-control" id="deptName" name="name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="deptLocation">Location</label>
-                        <input type="text" class="form-control" id="deptLocation" name="location">
-                    </div>
-                    <div class="form-group">
-                        <label for="deptContactPerson">Contact Person</label>
-                        <input type="text" class="form-control" id="deptContactPerson" name="contact_person">
-                    </div>
-                    <div class="form-group">
-                        <label for="deptContactPhone">Contact Phone</label>
-                        <input type="text" class="form-control" id="deptContactPhone" name="contact_phone">
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Department</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Edit Department Modal -->
-<div class="modal fade" id="editDepartmentModal" tabindex="-1" role="dialog" aria-hidden="true" style="z-index: 1051;">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Edit Department</h5>
-                <button type="button" class="close" data-dismiss="modal">
-                    <span>&times;</span>
-                </button>
-            </div>
-            <form method="post" action="?action=edit_department&tab=departments">
-                <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                <input type="hidden" id="editDeptId" name="id">
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label for="editDeptName">Department Name *</label>
-                        <input type="text" class="form-control" id="editDeptName" name="name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="editDeptLocation">Location</label>
-                        <input type="text" class="form-control" id="editDeptLocation" name="location">
-                    </div>
-                    <div class="form-group">
-                        <label for="editDeptContactPerson">Contact Person</label>
-                        <input type="text" class="form-control" id="editDeptContactPerson" name="contact_person">
-                    </div>
-                    <div class="form-group">
-                        <label for="editDeptContactPhone">Contact Phone</label>
-                        <input type="text" class="form-control" id="editDeptContactPhone" name="contact_phone">
-                    </div>
-                    <div class="form-group form-check">
-                        <input type="checkbox" class="form-check-input" id="editDeptIsActive" name="is_active" value="1">
-                        <label class="form-check-label" for="editDeptIsActive">Active</label>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Update Department</button>
-                </div>
-            </form>
         </div>
     </div>
 </div>

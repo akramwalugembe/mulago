@@ -2,9 +2,16 @@
 require_once __DIR__ . '/../includes/init.php';
 
 $auth = new Auth();
-if (!$auth->isLoggedIn() || !in_array($auth->getCurrentUser()['role'], ['admin', 'pharmacist'])) {
-    die('Access denied. You do not have permission to view this page.');
+if (!$auth->isLoggedIn()) {
+    redirect('../auth/login.php');
 }
+
+if (!in_array($auth->getCurrentUser()['role'], ['admin', 'department_staff'])) {
+    $_SESSION['flash_message'] = 'Access denied. You need higher privileges.';
+    header('Location: index.php');
+    exit();
+}
+
 
 $db = db();
 $message = '';

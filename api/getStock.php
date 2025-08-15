@@ -11,21 +11,22 @@ if (!$auth->isLoggedIn()) {
 
 $db = db();
 $drugId = (int)($_GET['drug_id'] ?? 0);
-$departmentId = (int)($_GET['department_id'] ?? 0);
 
-if (!$drugId || !$departmentId) {
-    echo json_encode(['error' => 'Missing parameters']);
+if (!$drugId) {
+    echo json_encode(['error' => 'Missing drug ID parameter']);
     exit;
 }
 
 try {
-    $stmt = $db->prepare("SELECT quantity_in_stock FROM inventory WHERE drug_id = ? AND department_id = ?");
-    $stmt->execute([$drugId, $departmentId]);
+    // Get total stock across all inventory
+    $stmt = $db->prepare("SELECT SUM(quantity_in_stock) FROM inventory WHERE drug_id = ?");
+    $stmt->execute([$drugId]);
     $stock = $stmt->fetchColumn();
     
     echo json_encode([
         'stock' => $stock !== false ? (int)$stock : 0
     ]);
 } catch (Exception $e) {
+    error_log('Stock check error: ' . $e->getMessage());
     echo json_encode(['error' => 'Database error']);
 }

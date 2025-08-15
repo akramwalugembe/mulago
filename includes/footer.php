@@ -28,17 +28,17 @@ $(document).ready(function() {
             $("#restockModal").modal("show");
         },
         
-showAdjustModal: function(inventoryId, drugName, batchNumber, expiryDate) {
-    $("#adjustInventoryId").val(inventoryId);
-    $("#adjustDrugName").val(drugName);
-    $("#adjustBatchNumber").val(batchNumber);
-    $("#adjustExpiryDate").val(expiryDate);
-    $("#adjustNewExpiryDate").val("").attr('min', new Date().toISOString().split('T')[0]);
-    $("#adjustNotes").val("");
-    $("#adjustment").val(1);
-    $("#adjustmentType").val("1").trigger('change');
-    $("#adjustModal").modal("show");
-},
+        showAdjustModal: function(inventoryId, drugName, batchNumber, expiryDate) {
+            $("#adjustInventoryId").val(inventoryId);
+            $("#adjustDrugName").val(drugName);
+            $("#adjustBatchNumber").val(batchNumber);
+            $("#adjustExpiryDate").val(expiryDate);
+            $("#adjustNewExpiryDate").val("").attr('min', new Date().toISOString().split('T')[0]);
+            $("#adjustNotes").val("");
+            $("#adjustment").val(1);
+            $("#adjustmentType").val("1").trigger('change');
+            $("#adjustModal").modal("show");
+        },
         
         showTransferModal: function(inventoryId, drugName, currentStock) {
             $("#transferInventoryId").val(inventoryId);
@@ -49,19 +49,7 @@ showAdjustModal: function(inventoryId, drugName, batchNumber, expiryDate) {
             $("#transferNotes").val("");
             $("#transferModal").modal("show");
         },
-        
-        // User Modals
-        showUserEditModal: function(userId, username, fullName, email, departmentId, role, isActive) {
-            $("#editUserId").val(userId);
-            $("#editUsername").val(username);
-            $("#editFullName").val(fullName);
-            $("#editEmail").val(email);
-            $("#editDepartment").val(departmentId || "");
-            $("#editRole").val(role);
-            $("#editIsActive").prop("checked", isActive);
-            $("#editUserModal").modal("show");
-        },
-        
+
         showPasswordModal: function(userId, username) {
             $("#passwordUserId").val(userId);
             $("#passwordUsername").val(username);
@@ -80,17 +68,6 @@ showAdjustModal: function(inventoryId, drugName, batchNumber, expiryDate) {
             $('#editDescription').val(description || '');
             $('#editIsActive').prop('checked', isActive);
             $('#editDrugModal').modal('show');
-        },
-        
-        // Department Modals
-        showDepartmentEditModal: function(id, name, location, contactPerson, contactPhone, isActive) {
-            $('#editDeptId').val(id);
-            $('#editDeptName').val(name);
-            $('#editDeptLocation').val(location);
-            $('#editDeptContactPerson').val(contactPerson);
-            $('#editDeptContactPhone').val(contactPhone);
-            $('#editDeptIsActive').prop('checked', isActive);
-            $('#editDepartmentModal').modal('show');
         },
         
         // Category Modals
@@ -129,9 +106,6 @@ showAdjustModal: function(inventoryId, drugName, batchNumber, expiryDate) {
                 case 'transaction':
                     action = '?action=delete_transaction';
                     break;
-                case 'department':
-                    action = '?action=delete_department&tab=departments';
-                    break;
                 case 'category':
                     action = '?action=delete_category&tab=categories';
                     break;
@@ -164,15 +138,13 @@ $("#adjustmentType").change(function() {
 
     function updateStockInfo() {
         const drugId = $('select[name="drug_id"]').val();
-        const departmentId = $('select[name="department_id"]').val();
         
-        if (drugId && departmentId) {
+        if (drugId) {
             $.ajax({
                 url: '../api/getStock.php',
                 method: 'GET',
                 data: {
-                    drug_id: drugId,
-                    department_id: departmentId
+                    drug_id: drugId
                 },
                 success: function(data) {
                     if (data.error) {
@@ -201,12 +173,12 @@ $("#adjustmentType").change(function() {
                 }
             });
         } else {
-            $('.available-stock').text('Select drug and department first').removeClass('text-danger text-warning text-success');
+            $('.available-stock').text('Select drug first').removeClass('text-danger text-warning text-success');
         }
     }
     
     // Call update when either dropdown changes
-    $('select[name="drug_id"], select[name="department_id"]').change(updateStockInfo);
+    $('select[name="drug_id"]').change(updateStockInfo);
     
     // Also call when modal is shown
     $('#addTransactionModal').on('shown.bs.modal', updateStockInfo);
@@ -240,15 +212,15 @@ $("#adjustmentType").change(function() {
     });
 
     // Transfer department toggle
-    $('#txnType').change(function() {
-        if ($(this).val() === 'transfer') {
-            $('#transferDeptRow').show();
-            $('#txnTransferTo').prop('required', true);
-        } else {
-            $('#transferDeptRow').hide();
-            $('#txnTransferTo').prop('required', false);
-        }
-    });
+    // $('#txnType').change(function() {
+    //     if ($(this).val() === 'transfer') {
+    //         $('#transferDeptRow').show();
+    //         $('#txnTransferTo').prop('required', true);
+    //     } else {
+    //         $('#transferDeptRow').hide();
+    //         $('#txnTransferTo').prop('required', false);
+    //     }
+    // });
 
     // Initialize datepicker for restock expiry date
     const today = new Date();
@@ -265,24 +237,23 @@ $("#adjustmentType").change(function() {
 
     // Initialize all DataTables
     function initializeDataTables() {
+        
         $('#inventoryTable').DataTable({
             pageLength: 25,
-            order: [[2, "asc"], [0, "asc"]],
-            columnDefs: [{ orderable: false, targets: [6] }]
+            order: [[2, "asc"]],
+            columnDefs: [
+                { orderable: false, targets: [5] }
+            ]
         });
 
         $('#usersTable').DataTable({
             pageLength: 25,
-            order: [[4, "asc"], [1, "asc"]],
-            columnDefs: [{ orderable: false, targets: [7] }]
+            order: [[1, "asc"]],
+            columnDefs: [
+                { orderable: false, targets: [5] }
+            ]
         });
 
-        $('#departmentsTable').DataTable({
-            pageLength: 25,
-            order: [[0, 'asc']],
-            columnDefs: [{ orderable: false, targets: [5] }]
-        });
-        
         $('#categoriesTable').DataTable({
             pageLength: 25,
             order: [[0, 'asc']],
@@ -315,25 +286,16 @@ $("#adjustmentType").change(function() {
         $(`#${tab}-tab`).tab('show');
     }
 
-    // Transaction type toggle
-    $('#txnType').change(function() {
-        if ($(this).val() === 'transfer') {
-            $('#transferDeptRow').show();
-            $('#txnTransferTo').prop('required', true);
-            $('#salePriceRow').hide();
-            $('#txnUnitPrice').prop('required', false);
-        } else if ($(this).val() === 'sale') {
-            $('#transferDeptRow').hide();
-            $('#txnTransferTo').prop('required', false);
-            $('#salePriceRow').show();
-            $('#txnUnitPrice').prop('required', true);
-        } else {
-            $('#transferDeptRow').hide();
-            $('#txnTransferTo').prop('required', false);
-            $('#salePriceRow').hide();
-            $('#txnUnitPrice').prop('required', false);
-        }
-    });
+// Transaction type toggle
+$('#txnType').change(function() {
+    if ($(this).val() === 'sale') {
+        $('#salePriceRow').show();
+        $('#txnUnitPrice').prop('required', true);
+    } else {
+        $('#salePriceRow').hide();
+        $('#txnUnitPrice').prop('required', false);
+    }
+}).trigger('change');
 
     // Calculate total amount when quantity or unit price changes
     $('#txnQuantity, #txnUnitPrice').on('input', function() {

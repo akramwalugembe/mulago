@@ -28,11 +28,10 @@ try {
     // Recent transactions
     $recentTransactions = $db->query("
         SELECT t.transaction_id, d.drug_name, t.transaction_type, t.quantity, 
-               t.created_at, u.full_name, dept.department_name
+               t.created_at, u.full_name
         FROM transactions t
         JOIN drugs d ON t.drug_id = d.drug_id
         JOIN users u ON t.created_by = u.user_id
-        JOIN departments dept ON t.department_id = dept.department_id
         ORDER BY t.created_at DESC
         LIMIT 5
     ")->fetchAll();
@@ -40,11 +39,9 @@ try {
     // Expiring soon (within 30 days)
     $expiringSoon = $db->query("
         SELECT i.inventory_id, d.drug_name, i.expiry_date, 
-               DATEDIFF(i.expiry_date, CURDATE()) as days_remaining,
-               dept.department_name
+               DATEDIFF(i.expiry_date, CURDATE()) as days_remaining
         FROM inventory i
         JOIN drugs d ON i.drug_id = d.drug_id
-        JOIN departments dept ON i.department_id = dept.department_id
         WHERE i.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
         ORDER BY i.expiry_date ASC
         LIMIT 5
@@ -82,7 +79,12 @@ require_once __DIR__ . '/../includes/header.php';
             </button>
         </div>
     <?php endif; ?>
-
+<?php if (isset($_SESSION['flash_message'])): ?>
+    <div class="alert alert-warning">
+        <?= htmlspecialchars($_SESSION['flash_message']) ?>
+    </div>
+    <?php unset($_SESSION['flash_message']); ?>
+<?php endif; ?>
     <!-- Quick Stats Cards -->
     <div class="row">
         <!-- Drugs Card -->
@@ -226,7 +228,6 @@ require_once __DIR__ . '/../includes/header.php';
                                     <th>Drug Name</th>
                                     <th>Expiry Date</th>
                                     <th>Days Left</th>
-                                    <th>Location</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -237,7 +238,6 @@ require_once __DIR__ . '/../includes/header.php';
                                         <td class="<?= $item['days_remaining'] < 7 ? 'text-danger font-weight-bold' : 'text-warning' ?>">
                                             <?= $item['days_remaining'] ?>
                                         </td>
-                                        <td><?= htmlspecialchars($item['department_name']) ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                                 <?php if (empty($expiringSoon)): ?>
@@ -272,7 +272,6 @@ require_once __DIR__ . '/../includes/header.php';
                                     <th>Drug</th>
                                     <th>Type</th>
                                     <th>Quantity</th>
-                                    <th>Department</th>
                                     <th>User</th>
                                 </tr>
                             </thead>
@@ -287,7 +286,6 @@ require_once __DIR__ . '/../includes/header.php';
                                             </span>
                                         </td>
                                         <td><?= $txn['quantity'] ?></td>
-                                        <td><?= htmlspecialchars($txn['department_name']) ?></td>
                                         <td><?= htmlspecialchars($txn['full_name']) ?></td>
                                     </tr>
                                 <?php endforeach; ?>

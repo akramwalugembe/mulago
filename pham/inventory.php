@@ -8,8 +8,10 @@ if (!$auth->isLoggedIn()) {
 
 // Check permissions
 $currentUser = $auth->getCurrentUser();
-if (!in_array($currentUser['role'], ['admin', 'pharmacist'])) {
-    die('Access denied. You do not have permission to view this page.');
+if (!in_array($currentUser['role'], ['admin', 'department_staff'])) {
+    $_SESSION['flash_message'] = 'Access denied. You need higher privileges.';
+    header('Location: index.php');
+    exit();
 }
 
 // Database connection
@@ -76,8 +78,8 @@ try {
                 // Record transaction
                 $transactionType = $adjustment > 0 ? 'stock_adjust_in' : 'stock_adjust_out';
                 $stmt = $db->prepare("INSERT INTO transactions 
-                    (drug_id, department_id, transaction_type, quantity, notes, created_by)
-                    SELECT drug_id, department_id, ?, ?, ?, ?
+                    (drug_id, transaction_type, quantity, notes, created_by)
+                    SELECT drug_id, ?, ?, ?, ?
                     FROM inventory WHERE inventory_id = ?");
                 $stmt->execute([$transactionType, abs($adjustment), $notes, $currentUser['user_id'], $inventoryId]);
 
@@ -98,7 +100,7 @@ try {
                 }
 
                 // Get inventory details
-                $stmt = $db->prepare("SELECT drug_id, department_id, quantity_in_stock FROM inventory WHERE inventory_id = ?");
+                $stmt = $db->prepare("SELECT drug_id, quantity_in_stock FROM inventory WHERE inventory_id = ?");
                 $stmt->execute([$inventoryId]);
                 $inventory = $stmt->fetch();
 
@@ -117,11 +119,10 @@ try {
 
                 // Record transaction
                 $stmt = $db->prepare("INSERT INTO transactions 
-                    (drug_id, department_id, transaction_type, quantity, notes, created_by)
+                    (drug_id, transaction_type, quantity, notes, created_by)
                     VALUES (?, ?, 'stock_adjust_out', ?, ?, ?)");
                 $stmt->execute([
                     $inventory['drug_id'],
-                    $inventory['department_id'],
                     $quantity,
                     $notes,
                     $currentUser['user_id']
@@ -129,119 +130,96 @@ try {
 
                 $message = 'Expiring stock removed successfully.';
                 break;
+case 'restock':
+    $drugId = (int)($_POST['drug_id'] ?? 0);
+    $quantity = (int)($_POST['quantity'] ?? 0);
+    $batchNumber = sanitizeInput($_POST['batch_number'] ?? '');
+    $expiryDate = $_POST['expiry_date'] ?? '';
+    $supplierId = (int)($_POST['supplier_id'] ?? 0);
+    $unitPrice = (float)($_POST['unit_price'] ?? 0);
 
-            case 'restock':
-                $drugId = (int)($_POST['drug_id'] ?? 0);
-                $departmentId = (int)($_POST['department_id'] ?? 0);
-                $quantity = (int)($_POST['quantity'] ?? 0);
-                $batchNumber = sanitizeInput($_POST['batch_number'] ?? '');
-                $expiryDate = $_POST['expiry_date'] ?? '';
-                $supplierId = (int)($_POST['supplier_id'] ?? 0);
-                $unitPrice = (float)($_POST['unit_price'] ?? 0);
+    if ($quantity <= 0) {
+        throw new Exception('Quantity must be positive.');
+    }
 
-                if ($drugId <= 0 || $departmentId <= 0) {
-                    throw new Exception('Invalid drug or department.');
-                }
+    if (empty($batchNumber)) {
+        throw new Exception('Batch number is required.');
+    }
 
-                if ($quantity <= 0) {
-                    throw new Exception('Quantity must be positive.');
-                }
+    if (empty($expiryDate)) {
+        throw new Exception('Expiry date is required.');
+    }
 
-                if (empty($batchNumber)) {
-                    throw new Exception('Batch number is required.');
-                }
+    // Check if expiry date is at least 6 months from today
+    $expiryDateTime = new DateTime($expiryDate);
+    $sixMonthsFromNow = (new DateTime())->add(new DateInterval('P6M'));
+    if ($expiryDateTime <= $sixMonthsFromNow) {
+        throw new Exception('Cannot add stock that expires in less than 6 months.');
+    }
 
-                if (empty($expiryDate)) {
-                    throw new Exception('Expiry date is required.');
-                }
+    if ($unitPrice <= 0) {
+        throw new Exception('Unit price must be positive.');
+    }
 
-                // Check if expiry date is at least 6 months from today
-                $expiryDateTime = new DateTime($expiryDate);
-                $sixMonthsFromNow = (new DateTime())->add(new DateInterval('P6M'));
-                if ($expiryDateTime <= $sixMonthsFromNow) {
-                    throw new Exception('Cannot add stock that expires in less than 6 months.');
-                }
+    $totalPrice = $unitPrice * $quantity;
 
-                if ($unitPrice <= 0) {
-                    throw new Exception('Unit price must be positive.');
-                }
+    $db->beginTransaction();
 
-                $totalPrice = $unitPrice * $quantity;
+    try {
+        // Check if this drug already exists in inventory (regardless of batch or expiry)
+        $stmt = $db->prepare("SELECT inventory_id FROM inventory WHERE drug_id = ?");
+        $stmt->execute([$drugId]);
 
-                $db->beginTransaction();
+        if ($existingItem = $stmt->fetch()) {
+            // Update existing drug's quantity
+            $stmt = $db->prepare("UPDATE inventory 
+                    SET quantity_in_stock = quantity_in_stock + ?, 
+                        batch_number = ?,
+                        expiry_date = ?,
+                        last_restocked = CURDATE()
+                    WHERE drug_id = ?");
+            $stmt->execute([$quantity, $batchNumber, $expiryDate, $drugId]);
+        } else {
+            // Create new inventory entry
+            $stmt = $db->prepare("INSERT INTO inventory 
+                    (drug_id, quantity_in_stock, batch_number, expiry_date, last_restocked)
+                    VALUES (?, ?, ?, ?, CURDATE())");
+            $stmt->execute([$drugId, $quantity, $batchNumber, $expiryDate]);
+        }
 
-                try {
+        // Record purchase (still tracking batch/expiry for purchasing)
+        $stmt = $db->prepare("INSERT INTO purchases 
+                (drug_id, supplier_id, batch_number, quantity, unit_price, total_price, purchase_date, expiry_date, received_by)
+                VALUES (?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)");
+        $stmt->execute([$drugId, $supplierId, $batchNumber, $quantity, $unitPrice, $totalPrice, $expiryDate, $currentUser['user_id']]);
 
-                    $stmt = $db->prepare("SELECT inventory_id FROM inventory 
-                            WHERE drug_id = ? AND department_id = ? 
-                            AND batch_number = ? AND expiry_date != ?");
-                    $stmt->execute([$drugId, $departmentId, $batchNumber, $expiryDate]);
+        // Record transaction
+        $stmt = $db->prepare("INSERT INTO transactions 
+                (drug_id, transaction_type, quantity, notes, created_by)
+                VALUES (?, 'stock_receive', ?, 'Initial restock', ?)");
+        $stmt->execute([$drugId, $quantity, $currentUser['user_id']]);
 
-                    if ($existingItem = $stmt->fetch()) {
-                        // Update existing batch with new expiry date
-                        $stmt = $db->prepare("UPDATE inventory 
-                                SET quantity_in_stock = quantity_in_stock + ?, 
-                                    expiry_date = ?,
-                                    last_restocked = CURDATE()
-                                WHERE inventory_id = ?");
-                        $stmt->execute([$quantity, $expiryDate, $existingItem['inventory_id']]);
-                    }
-
-                    $stmt = $db->prepare("SELECT inventory_id FROM inventory 
-                                        WHERE drug_id = ? AND department_id = ? 
-                                        AND batch_number = ? AND expiry_date = ?");
-                    $stmt->execute([$drugId, $departmentId, $batchNumber, $expiryDate]);
-
-                    if ($stmt->fetch()) {
-                        // Update existing batch
-                        $stmt = $db->prepare("UPDATE inventory 
-                                            SET quantity_in_stock = quantity_in_stock + ?, 
-                                                last_restocked = CURDATE()
-                                            WHERE drug_id = ? AND department_id = ? 
-                                            AND batch_number = ? AND expiry_date = ?");
-                        $stmt->execute([$quantity, $drugId, $departmentId, $batchNumber, $expiryDate]);
-                    } else {
-                        // Create new batch
-                        $stmt = $db->prepare("INSERT INTO inventory 
-                                            (drug_id, department_id, quantity_in_stock, batch_number, expiry_date, last_restocked)
-                                            VALUES (?, ?, ?, ?, ?, CURDATE())");
-                        $stmt->execute([$drugId, $departmentId, $quantity, $batchNumber, $expiryDate]);
-                    }
-
-                    // Record purchase
-                    $stmt = $db->prepare("INSERT INTO purchases 
-                                        (drug_id, supplier_id, batch_number, quantity, unit_price, total_price, purchase_date, expiry_date, received_by)
-                                        VALUES (?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)");
-                    $stmt->execute([$drugId, $supplierId, $batchNumber, $quantity, $unitPrice, $totalPrice, $expiryDate, $currentUser['user_id']]);
-
-                    // Record transaction
-                    $stmt = $db->prepare("INSERT INTO transactions 
-                                        (drug_id, department_id, transaction_type, quantity, notes, created_by)
-                                        VALUES (?, ?, 'stock_receive', ?, 'Initial restock', ?)");
-                    $stmt->execute([$drugId, $departmentId, $quantity, $currentUser['user_id']]);
-
-                    $db->commit();
-                    $message = 'Inventory restocked successfully.';
-                } catch (Exception $e) {
-                    $db->rollBack();
-                    throw $e;
-                }
-                break;
+        $db->commit();
+        $message = 'Inventory restocked successfully.';
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+    break;
         }
     }
 
     // Get inventory data
     try {
         $inventoryItems = $db->query("
-            SELECT i.inventory_id, d.drug_name, c.category_name, dept.department_name,
+            SELECT i.inventory_id, i.last_restocked, d.drug_name, c.category_name,
                    i.quantity_in_stock, d.reorder_level, i.expiry_date,
                    DATEDIFF(i.expiry_date, CURDATE()) as days_until_expiry,
                    i.batch_number, i.last_restocked, d.drug_id
             FROM inventory i
             JOIN drugs d ON i.drug_id = d.drug_id
             LEFT JOIN drug_categories c ON d.category_id = c.category_id
-            JOIN departments dept ON i.department_id = dept.department_id
-            ORDER BY dept.department_name, d.drug_name
+            ORDER BY d.drug_name
         ")->fetchAll();
     } catch (PDOException $e) {
         error_log("Inventory query error: " . $e->getMessage());
@@ -254,13 +232,6 @@ try {
     // Get suppliers for restock dropdown
     $suppliers = $db->query("SELECT supplier_id, supplier_name FROM suppliers WHERE is_active = 1 ORDER BY supplier_name")->fetchAll();
 
-    // Get departments for transfer dropdown
-    try {
-        $departments = $db->query("SELECT department_id, department_name FROM departments WHERE is_active = 1 ORDER BY department_name")->fetchAll();
-    } catch (PDOException $e) {
-        error_log("Departments query error: " . $e->getMessage());
-        $departments = [];
-    }
 } catch (Exception $e) {
     $error = $e->getMessage();
 }
@@ -309,8 +280,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Total Inventory Items</div>
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Inventory Items</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800">
                                 <?= count($inventoryItems ?? []) ?>
                             </div>
@@ -350,9 +320,9 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
                             <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
-                                Expiring Soon (≤10 days)</div>
+                                Expiring Soon (≤30 days)</div>
                             <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                <?= count(array_filter($inventoryItems, fn($item) => $item['days_until_expiry'] !== null && $item['days_until_expiry'] <= 10)) ?>
+                                <?= count(array_filter($inventoryItems, fn($item) => $item['days_until_expiry'] !== null && $item['days_until_expiry'] <= 30)) ?>
                             </div>
                         </div>
                         <div class="col-auto">
@@ -363,27 +333,8 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
 
-        <!-- Departments Card -->
-        <div class="col-xl-3 col-md-6 mb-4">
-            <div class="card border-left-info shadow h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
-                                Departments</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800"><?= count($departments ?? []) ?></div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-clinic-medical fa-2x text-gray-300"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Inventory Table -->
-    <div class="card shadow mb-4">
+    <div class="card shadow mb-4" style="margin-left: 20px; margin-right: 20px; width: 100%;">
         <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
             <h6 class="m-0 font-weight-bold text-primary">Current Inventory</h6>
             <div>
@@ -399,9 +350,9 @@ require_once __DIR__ . '/../includes/header.php';
                         <tr>
                             <th>Drug Name</th>
                             <th>Category</th>
-                            <th>Department</th>
                             <th>Batch #</th>
                             <th>Stock</th>
+                            <th>Last Re-stocked</th>
                             <th>Expiry</th>
                             <th>Actions</th>
                         </tr>
@@ -412,7 +363,6 @@ require_once __DIR__ . '/../includes/header.php';
                                    <?= $item['days_until_expiry'] !== null && $item['days_until_expiry'] <= 10 ? 'table-danger' : '' ?>">
                                 <td><?= htmlspecialchars($item['drug_name']) ?></td>
                                 <td><?= htmlspecialchars($item['category_name']) ?></td>
-                                <td><?= htmlspecialchars($item['department_name']) ?></td>
                                 <td><?= htmlspecialchars($item['batch_number']) ?></td>
                                 <td>
                                     <span class="<?= $item['quantity_in_stock'] <= $item['reorder_level'] ? 'font-weight-bold text-danger' : '' ?>">
@@ -423,9 +373,15 @@ require_once __DIR__ . '/../includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td>
+                                    <?php if ($item['last_restocked']): ?>
+                                        <?= formatDate($item['last_restocked']) ?>
+                                    <?php else: ?>
+                                        N/A
+                                    <?php endif; ?>
+                                <td style="white-space: nowrap;">
                                     <?php if ($item['expiry_date']): ?>
                                         <?= formatDate($item['expiry_date']) ?>
-                                        <small class="d-block <?= $item['days_until_expiry'] <= 10 ? 'text-danger font-weight-bold' : 'text-muted' ?>">
+                                        <small class="d-inline <?= $item['days_until_expiry'] <= 30 ? 'text-danger font-weight-bold' : 'text-muted' ?>">
                                             (<?= $item['days_until_expiry'] ?> days)
                                         </small>
                                     <?php else: ?>
@@ -436,12 +392,12 @@ require_once __DIR__ . '/../includes/header.php';
                                     <div class="btn-group btn-group-sm" role="group">
                                         <button class="btn btn-info btn-sm"
                                             onclick="PharmacyModals.showAdjustModal(
-        <?= $item['inventory_id'] ?>, 
-        '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>',
-        '<?= isset($item['batch_number']) ? htmlspecialchars(addslashes($item['batch_number'])) : 'N/A' ?>',
-        '<?= isset($item['expiry_date']) ? date('Y-m-d', strtotime($item['expiry_date'])) : 'N/A' ?>'
-    )"
-                                            title="Adjust Stock">
+                                                <?= $item['inventory_id'] ?>, 
+                                                '<?= htmlspecialchars(addslashes($item['drug_name'])) ?>',
+                                                '<?= isset($item['batch_number']) ? htmlspecialchars(addslashes($item['batch_number'])) : 'N/A' ?>',
+                                                '<?= isset($item['expiry_date']) ? date('Y-m-d', strtotime($item['expiry_date'])) : 'N/A' ?>'
+                                            )"
+                                            title="Adjust Stock" style="margin-right: 5px;">
                                             <i class="fas fa-adjust"></i>
                                         </button>
                                         <?php if ($item['days_until_expiry'] <= 10): ?>
@@ -576,15 +532,6 @@ require_once __DIR__ . '/../includes/header.php';
                             <option value="">Select Drug</option>
                             <?php foreach ($drugs as $drug): ?>
                                 <option value="<?= $drug['drug_id'] ?>"><?= htmlspecialchars($drug['drug_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="restockDepartment">Department *</label>
-                        <select class="form-control" id="restockDepartment" name="department_id" required>
-                            <option value="">Select Department</option>
-                            <?php foreach ($departments as $dept): ?>
-                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>

@@ -23,10 +23,10 @@ $currentUser = $auth->getCurrentUser();
 
     <link href="../assets/css/styles.css" rel="stylesheet">
 </head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+<body style="padding-top: 56px;">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
         <div class="container">
-            <a class="navbar-brand" href="index.php">Mulago Pharmacy</a>
+            <a class="navbar-brand">Mulago Pharmacy</a>
             <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
@@ -36,18 +36,26 @@ $currentUser = $auth->getCurrentUser();
                     <li class="nav-item">
                         <a class="nav-link" href="index.php">Dashboard</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="transactions.php">Transactions</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="drugs.php">Drugs</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="inventory.php">Inventory</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="management.php">Management</a>
-                    </li>
+
+                    <?php if (in_array($currentUser['role'], ['admin', 'pharmacist'])): ?>
+                        <li class="nav-item">
+                            <a class="nav-link" href="transactions.php">Transactions</a>
+                        </li>
+                    <?php endif; ?>
+                    
+                    <?php if (in_array($currentUser['role'], ['admin', 'department_staff'])): ?>
+                        <li class="nav-item">
+                            <a class="nav-link" href="drugs.php">Drugs</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="inventory.php">Inventory</a>
+                        </li>
+
+                        <li class="nav-item">
+                            <a class="nav-link" href="management.php">Management</a>
+                        </li>
+                    <?php endif; ?>
+
                     <?php if (hasRole('admin')): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="users.php">Users</a>
@@ -61,7 +69,7 @@ $currentUser = $auth->getCurrentUser();
                         </a>
                         <div class="dropdown-menu">
                             <!-- <a class="dropdown-item" href="../auth/profile.php">Profile</a> -->
-                            <a class="dropdown-item" href="../auth/change-password.php">Change Password</a>
+                            <a class="dropdown-item" href="change-password.php">Change Password</a>
                             <div class="dropdown-divider"></div>
                             <a class="dropdown-item" href="../auth/logout.php">Logout</a>
                         </div>
@@ -71,4 +79,5 @@ $currentUser = $auth->getCurrentUser();
             </div>
         </div>
     </nav>
-    <div class="container mt-4">
+    <!-- <div class="container mt-4"> -->
+    <div class="container-fluid mt-4 px-md-4"></div>

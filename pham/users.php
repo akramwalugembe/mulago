@@ -2,8 +2,14 @@
 require_once __DIR__ . '/../includes/init.php';
 
 $auth = new Auth();
+if (!$auth->isLoggedIn()) {
+    redirect('../auth/login.php');
+}
 if (!$auth->isLoggedIn() || $auth->getCurrentUser()['role'] !== 'admin') {
-    die('Access denied. Administrator privileges required.');
+    $_SESSION['flash_message'] = 'Access denied. You need higher privileges.';
+    header('Location: index.php');
+    exit();
+    // die('Access denied. Administrator privileges required.');
 }
 
 $db = db();
@@ -25,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $password = $_POST['password'] ?? '';
                     $fullName = sanitizeInput($_POST['full_name'] ?? '');
                     $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
-                    $departmentId = (int)($_POST['department_id'] ?? 0);
+
                     $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff'])
                         ? $_POST['role']
                         : 'department_staff';
@@ -53,14 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Insert user
                     $stmt = $db->prepare("INSERT INTO users 
                                         (username, password_hash, full_name, email, 
-                                        department_id, role, is_active)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?)");
+                                        role, is_active)
+                                        VALUES (?, ?, ?, ?, ?, ?)");
                     $stmt->execute([
                         $username,
                         $passwordHash,
                         $fullName,
                         $email,
-                        $departmentId > 0 ? $departmentId : null,
                         $role,
                         $isActive
                     ]);
@@ -72,7 +77,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $userId = (int)($_POST['user_id'] ?? 0);
                     $fullName = sanitizeInput($_POST['full_name'] ?? '');
                     $email = filter_var($_POST['email'] ?? '', FILTER_SANITIZE_EMAIL);
-                    $departmentId = (int)($_POST['department_id'] ?? 0);
                     $role = in_array($_POST['role'] ?? '', ['admin', 'pharmacist', 'department_staff'])
                         ? $_POST['role']
                         : 'department_staff';
@@ -90,8 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Update user
                     $stmt = $db->prepare("UPDATE users SET 
                                         full_name = ?, 
-                                        email = ?, 
-                                        department_id = ?, 
+                                        email = ?,
                                         role = ?, 
                                         is_active = ?,
                                         updated_at = CURRENT_TIMESTAMP
@@ -99,7 +102,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([
                         $fullName,
                         $email,
-                        $departmentId > 0 ? $departmentId : null,
                         $role,
                         $isActive,
                         $userId
@@ -163,16 +165,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get all users with department names
 $users = $db->query("
-    SELECT u.*, d.department_name 
-    FROM users u
-    LEFT JOIN departments d ON u.department_id = d.department_id
-    ORDER BY u.role, u.full_name
+    SELECT * FROM users
+    ORDER BY role, full_name
 ")->fetchAll();
-
-// Get departments for dropdown
-$departments = $db->query("SELECT department_id, department_name FROM departments ORDER BY department_name")->fetchAll();
 
 $csrfToken = generateCsrfToken();
 require_once __DIR__ . '/../includes/header.php';
@@ -220,7 +216,6 @@ require_once __DIR__ . '/../includes/header.php';
                             <th>Full Name</th>
                             <th>Email</th>
                             <th>Department</th>
-                            <th>Role</th>
                             <th>Status</th>
                             <th>Last Login</th>
                             <th>Actions</th>
@@ -232,11 +227,8 @@ require_once __DIR__ . '/../includes/header.php';
                                 <td><?= htmlspecialchars($user['username']) ?></td>
                                 <td><?= htmlspecialchars($user['full_name']) ?></td>
                                 <td><?= htmlspecialchars($user['email']) ?></td>
-                                <td><?= htmlspecialchars($user['department_name'] ?? 'N/A') ?></td>
                                 <td>
-                                    <span class="badge badge-<?=
-                                                                $user['role'] === 'admin' ? 'danger' : ($user['role'] === 'pharmacist' ? 'primary' : 'secondary')
-                                                                ?>">
+                                    <span class="badge badge-<?= $user['role'] === 'admin' ? 'danger' : ($user['role'] === 'pharmacist' ? 'primary' : 'secondary')?>">
                                         <?= ucfirst($user['role']) ?>
                                     </span>
                                 </td>
@@ -251,14 +243,13 @@ require_once __DIR__ . '/../includes/header.php';
                                         <button class="btn btn-sm btn-outline-primary"
                                             title="Edit User"
                                             onclick="PharmacyModals.showUserEditModal(
-                <?= $user['user_id'] ?>,
-                '<?= htmlspecialchars(addslashes($user['username'])) ?>',
-                '<?= htmlspecialchars(addslashes($user['full_name'])) ?>',
-                '<?= htmlspecialchars(addslashes($user['email'])) ?>',
-                <?= $user['department_id'] ?? 'null' ?>,
-                '<?= $user['role'] ?>',
-                <?= $user['is_active'] ?>
-            )">
+                                                <?= $user['user_id'] ?>,
+                                                '<?= htmlspecialchars(addslashes($user['username'])) ?>',
+                                                '<?= htmlspecialchars(addslashes($user['full_name'])) ?>',
+                                                '<?= htmlspecialchars(addslashes($user['email'])) ?>'
+                                                '<?= $user['role'] ?>',
+                                                <?= $user['is_active'] ?>
+                                            )">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button class="btn btn-sm btn-outline-warning"
@@ -313,16 +304,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <input type="email" class="form-control" id="addEmail" name="email">
                     </div>
                     <div class="mb-3">
-                        <label for="addDepartment" class="form-label">Department</label>
-                        <select class="form-control" id="addDepartment" name="department_id">
-                            <option value="">-- Select Department --</option>
-                            <?php foreach ($departments as $dept): ?>
-                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="addRole" class="form-label">Role *</label>
+                        <label for="addRole" class="form-label">Department *</label>
                         <select class="form-control" id="addRole" name="role" required>
                             <option value="department_staff">Department Staff</option>
                             <option value="pharmacist">Pharmacist</option>
@@ -369,16 +351,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <input type="email" class="form-control" id="editEmail" name="email">
                     </div>
                     <div class="mb-3">
-                        <label for="editDepartment" class="form-label">Department</label>
-                        <select class="form-select" id="editDepartment" name="department_id">
-                            <option value="">-- Select Department --</option>
-                            <?php foreach ($departments as $dept): ?>
-                                <option value="<?= $dept['department_id'] ?>"><?= htmlspecialchars($dept['department_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="editRole" class="form-label">Role *</label>
+                        <label for="editRole" class="form-label">Department *</label>
                         <select class="form-select" id="editRole" name="role" required>
                             <option value="department_staff">Department Staff</option>
                             <option value="pharmacist">Pharmacist</option>
